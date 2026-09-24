@@ -2,16 +2,26 @@
 """Quản trị: cấu hình mẫu (mục/dòng/đối tượng) + người dùng — CHỈ ADMIN."""
 from __future__ import annotations
 
+import json
 import re
 
-from fastapi import APIRouter, Depends, Form, HTTPException, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi import APIRouter, Depends, Form, HTTPException, Request, UploadFile
+from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..database import get_db
 from ..deps import require_admin
 from ..models import AuditLog, Block, ColumnDef, Department, ReportTemplate, RptRow, Section, User
+from ..backup import (
+    backup_dir,
+    create_backup,
+    list_backups,
+    load_backup_file,
+    read_uploaded,
+    restore_payload,
+    NAME_RE,
+)
 from ..report import get_structure, slugify_col_key
 from ..security import hash_password
 
@@ -676,3 +686,129 @@ def toggle_nguoi_dung(
         u.active = not u.active
         db.commit()
     return RedirectResponse("/cau-hinh/nguoi-dung", status_code=303)
+
+
+# ---------------- sao lưu / phục hồi (chỉ admin) ----------------
+def _audit_action(db: Session, user, action: str, label: str) -> None:
+    db.add(
+        AuditLog(
+            user_id=user.id,
+            username=user.username,
+            dept_id=user.dept_id,
+            row_label=label,
+            col_key="*",
+            action=action,
+        )
+    )
+    db.commit()
+
+
+@router.get("/sao-luu", response_class=HTMLResponse)
+def sao_luu(
+    request: Request,
+    da_phuc_hoi: str | None = None,
+    user: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    depts = db.scalars(select(Department).order_by(Department.name)).all()
+    return request.app.state.templates.TemplateResponse(
+        request,
+        "admin.html",
+        {
+            "user": user,
+            "tab": "sao-luu",
+            "backups": list_backups(),
+            "backup_dir": str(backup_dir()),
+            "da_phuc_hoi": da_phuc_hoi,
+            "data": [],
+            "depts": depts,
+            "users": [],
+            "khoa_sel": None,
+        },
+    )
+
+
+@router.post("/sao-luu/tao")
+def sao_luu_tao(
+    note: str = Form(""),
+    user: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    fname = create_backup(db, note=(note or "").strip())
+    _audit_action(db, user, "backup", f"Tạo bản sao lưu {fname}")
+    return RedirectResponse("/cau-hinh/sao-luu", status_code=303)
+
+
+def _safe_backup_path(name: str) -> Path:
+    if not NAME_RE.fullmatch(name or "") or ".." in name:
+        raise HTTPException(status_code=400, detail="Tên file bản sao lưu không hợp lệ.")
+    path = (backup_dir() / name).resolve()
+    if path.parent != backup_dir().resolve() or not path.exists():
+        raise HTTPException(status_code=404, detail="Không thấy bản sao lưu.")
+    return path
+
+
+@router.get("/sao-luu/{name}/tai")
+def sao_luu_tai(name: str, user: User = Depends(require_admin)):
+    path = _safe_backup_path(name)
+    data = path.read_bytes()
+    return Response(
+        content=data,
+        media_type="application/gzip",
+        headers={"Content-Disposition": f'attachment; filename="{name}"'},
+    )
+
+
+@router.post("/sao-luu/xoa")
+def sao_luu_xoa(
+    name: str = Form(...),
+    user: User = Depends(require_admin),
+):
+    path = _safe_backup_path(name)
+    path.unlink()
+    return RedirectResponse("/cau-hinh/sao-luu", status_code=303)
+
+
+def _do_restore(db: Session, user, payload: dict, src_label: str) -> None:
+    # bản sao lưu an toàn TRƯỚC khi ghi đè
+    safe = create_backup(db, note="Tự động trước khi phục hồi")
+    counts = restore_payload(db, payload)
+    _audit_action(
+        db,
+        user,
+        "restore",
+        f"Phục hồi từ {src_label} (sao lưu an toàn: {safe})",
+    )
+    print(f"[restore] {src_label} → {counts}")
+
+
+@router.post("/sao-luu/phuc-hoi")
+def sao_luu_phuc_hoi(
+    name: str = Form(...),
+    user: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    path = _safe_backup_path(name)
+    try:
+        payload = load_backup_file(path)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    _do_restore(db, user, payload, name)
+    return RedirectResponse(f"/cau-hinh/sao-luu?da_phuc_hoi={name}", status_code=303)
+
+
+@router.post("/sao-luu/tai-len")
+async def sao_luu_tai_len(
+    file: UploadFile,
+    user: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    data = await file.read()
+    try:
+        payload = read_uploaded(data)
+    except (ValueError, UnicodeDecodeError) as e:
+        raise HTTPException(status_code=400, detail=f"File không hợp lệ: {e}")
+    _do_restore(db, user, payload, f"tải lên: {file.filename}")
+    return RedirectResponse(
+        f"/cau-hinh/sao-luu?da_phuc_hoi={file.filename}", status_code=303
+    )

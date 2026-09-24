@@ -20,6 +20,8 @@ SESSION_HOURS = int(os.getenv("SESSION_HOURS", "12"))
 HOST = os.getenv("HOST", "0.0.0.0")
 PORT = int(os.getenv("PORT", "8000"))
 BASE_URL = os.getenv("BASE_URL", "")
+# Nơi lưu bản sao lưu (mặc định: <thư mục app>/backups)
+BACKUP_DIR = os.getenv("BACKUP_DIR", str(BASE_DIR / "backups"))
 
 # Tự seed admin mặc định lần đầu (chỉ khi DB trống)
 SEED_ADMIN_USER = os.getenv("SEED_ADMIN_USER", "admin")

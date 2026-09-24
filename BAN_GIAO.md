@@ -183,7 +183,23 @@ echo '0 2 * * * root /opt/bao-cao-khoa/scripts/backup.sh >> /var/log/bao-cao-bac
   > /etc/cron.d/bao-cao-backup
 ```
 
-**Khôi phục (tóm tắt):**
+```bash
+# Khôi phục toàn hệ thống (dừng app → backup an toàn hiện tại → nạp lại DB → chạy lại):
+sudo bash /opt/bao-cao-khoa/scripts/restore.sh /var/backups/bao-cao-khoa/db_2026-09-24_0200.sql.gz
+# kèm phục hồi cả mã nguồn + .env (tuỳ chọn):
+sudo bash /opt/bao-cao-khoa/scripts/restore.sh db_....sql.gz app_....tar.gz
+```
+
+**Cách 1 — ngay trên giao diện web (khuyến nghị cho quản trị):**
+
+Đăng nhập admin → **Cấu hình → Sao lưu**:
+
+- **Tạo bản sao lưu** — chứa toàn bộ dữ liệu (khoa, mẫu, số liệu, lịch sử, tài khoản) thành 1 file `.json.gz`
+- **Tải về** để lưu ở máy khác (bản tốt nhất là bản nằm ngoài server)
+- **Phục hồi** từ bản trên máy chủ hoặc **Tải lên** file từ máy khác — hệ thống **tự tạo bản sao lưu an toàn** trước khi ghi đè; mọi thao tác sao lưu/phục hồi đều ghi vào Lịch sử sửa
+
+**Cách 2 — script hệ thống (cho IT, chạy cron mỗi đêm):**
+
 
 ```bash
 gunzip -c /var/backups/bao-cao-khoa/db_YYYY-MM-DD_HHMM.sql.gz | \

@@ -10,6 +10,7 @@
     <a class="btn {{ 'primary' if tab!='nguoi-dung' else '' }}" href="/cau-hinh?tab=mau">Mẫu báo cáo</a>
     <a class="btn {{ 'primary' if tab=='doi-tuong' else '' }}" href="/cau-hinh?tab=doi-tuong">Đối tượng (cột)</a>
     <a class="btn {{ 'primary' if tab=='nguoi-dung' else '' }}" href="/cau-hinh/nguoi-dung">Người dùng</a>
+    <a class="btn {{ 'primary' if tab=='sao-luu' else '' }}" href="/cau-hinh/sao-luu">Sao lưu</a>
     <a class="btn" href="/cau-hinh/lich-su">Lịch sử sửa</a>
     <button class="btn" onclick="document.getElementById('addDeptBox').hidden = !document.getElementById('addDeptBox').hidden">+ Thêm khoa</button>
   </div>
@@ -25,6 +26,7 @@
 </div>
 
 {# ---- tìm khoa + nhảy nhanh (dùng cho cả tab Mẫu và Đối tượng) ---- #}
+{% if tab == 'mau' or tab == 'doi-tuong' %}
 <style>
   .chip.is-active { outline: 2px solid #1d4ed8; font-weight: 700; }
   .chip-row { display: flex; flex-wrap: wrap; gap: .4rem; align-items: center; }
@@ -40,9 +42,10 @@
   </div>
   <p class="muted" style="margin:.4rem 0 0">💡 Chọn 1 khoa để chỉ hiện mẫu của khoa đó — sửa xong hệ thống quay lại đúng chỗ vừa sửa.</p>
 </div>
+{% endif %}
 
 {# ===================== TAB MẪU ===================== #}
-{% if tab != 'doi-tuong' and tab != 'nguoi-dung' %}
+{% if tab != 'doi-tuong' and tab != 'nguoi-dung' and tab != 'sao-luu' %}
 {% for item in data %}
 <div class="card tmpl-card" id="dept-{{ item.dept.id }}" style="margin-top:1rem">
   <div class="tmpl-head">
@@ -304,5 +307,65 @@
   {% endif %}
 </div>
 {% endfor %}
+{% endif %}
+
+{# ===================== TAB SAO LƯU ===================== #}
+{% if tab == 'sao-luu' %}
+<div class="notice info">
+  Bản sao lưu chứa <strong>toàn bộ dữ liệu</strong>: khoa, mẫu, số liệu đã nhập, lịch sử sửa, tài khoản.
+  Nên định kỳ <strong>tải file về máy khác</strong> + bật cron <code>scripts/backup.sh</code> hàng ngày.
+</div>
+{% if da_phuc_hoi %}
+<div class="notice warn">✅ Đã phục hồi từ <strong>{{ da_phuc_hoi }}</strong> — hệ thống đã tự tạo 1 bản sao lưu an toàn ngay trước khi ghi đè.</div>
+{% endif %}
+
+<div class="card" style="margin-top:1rem">
+  <div class="card-title">Tạo bản sao lưu ngay</div>
+  <form method="post" action="/cau-hinh/sao-luu/tao" class="inline-form">
+    <input name="note" placeholder="Ghi chú (tuỳ chọn, vd: trước khi đổi cấu trúc mẫu)" style="min-width:280px">
+    <button class="btn primary" type="submit">💾 Tạo bản sao lưu</button>
+  </form>
+</div>
+
+<div class="card" style="margin-top:1rem">
+  <div class="card-title">Khôi phục từ file (tải lên từ máy khác)</div>
+  <form method="post" action="/cau-hinh/sao-luu/tai-len" enctype="multipart/form-data" class="inline-form"
+        onsubmit="return confirm('PHỤC HỔI sẽ GHI ĐÈ toàn bộ dữ liệu hiện tại bằng dữ liệu trong file?\nHệ thống sẽ tự tạo 1 bản sao lưu an toàn trước khi phục hồi.')">
+    <input type="file" name="file" accept=".gz,.json" required>
+    <button class="btn danger" type="submit">⬆ Tải lên &amp; Phục hồi</button>
+  </form>
+</div>
+
+<div class="card" style="margin-top:1rem">
+  <div class="card-title">Các bản sao lưu trên máy chủ <span class="muted" style="font-weight:400">— thư mục: {{ backup_dir }}</span></div>
+  <table class="mini-table">
+    <thead><tr><th>File</th><th>Thời điểm</th><th>Kích thước</th><th></th></tr></thead>
+    <tbody>
+    {% for b in backups %}
+      <tr>
+        <td><code>{{ b.name }}</code></td>
+        <td>{{ b.mtime.strftime('%d/%m/%Y %H:%M') }}</td>
+        <td>{{ (b.size / 1024) | round(1) }} KB</td>
+        <td>
+          <a class="btn small" href="/cau-hinh/sao-luu/{{ b.name }}/tai">⬇ Tải về</a>
+          <form method="post" action="/cau-hinh/sao-luu/phuc-hoi" style="display:inline"
+                onsubmit="return confirm('Phục hồi từ {{ b.name }}?\nDữ liệu HIỆN TẠI sẽ bị GHI ĐÈ.\nHệ thống tự tạo bản sao lưu an toàn trước khi phục hồi.')">
+            <input type="hidden" name="name" value="{{ b.name }}">
+            <button class="btn small danger" type="submit">↺ Phục hồi</button>
+          </form>
+          <form method="post" action="/cau-hinh/sao-luu/xoa" style="display:inline"
+                onsubmit="return confirm('Xóa file sao lưu {{ b.name }}?')">
+            <input type="hidden" name="name" value="{{ b.name }}">
+            <button class="btn small ghost" type="submit">✕</button>
+          </form>
+        </td>
+      </tr>
+    {% else %}
+      <tr><td colspan="4" class="muted">Chưa có bản sao lưu nào — bấm «Tạo bản sao lưu».</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  <p class="muted">💡 Vận hành dài hạn: cron <code>scripts/backup.sh</code> (pg_dump) mỗi đêm — khôi phục toàn hệ thống dùng <code>scripts/restore.sh</code> (xem BAN_GIAO.md §4.2).</p>
+</div>
 {% endif %}
 {% endblock %}
