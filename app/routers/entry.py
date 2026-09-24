@@ -6,8 +6,9 @@ import json
 from datetime import date, timedelta
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from ..database import get_db
@@ -87,46 +88,71 @@ def nhap_save(
     structure = get_structure(db, tmpl.id)
     input_keys = {c.col_key for c in structure["columns"] if c.kind == INPUT_KIND}
     day = date.fromisoformat(ngay)
-    data = json.loads(payload)
-    n = 0
-    for row_id_s, cols in data.items():
-        try:
-            row_id = int(row_id_s)
-        except ValueError:
-            continue
-        for col_key, val in cols.items():
-            if col_key not in input_keys:
-                continue
+    try:
+        data = json.loads(payload)
+    except json.JSONDecodeError:
+        return JSONResponse(
+            {"ok": False, "error": "payload không hợp lệ"}, status_code=400
+        )
+    if not isinstance(data, dict):
+        return JSONResponse(
+            {"ok": False, "error": "payload không hợp lệ"}, status_code=400
+        )
+
+    def _apply() -> int:
+        n = 0
+        for row_id_s, cols in data.items():
             try:
-                v = float(val)
+                row_id = int(row_id_s)
             except (TypeError, ValueError):
-                v = 0.0
-            row = db.get(RptRow, row_id)
-            # bỏ qua dòng không tồn tại hoặc đã ngừng (kể cả thuộc mục/nhóm đã ngừng)
-            if row is None or row.archived:
                 continue
-            sec_of_row = db.get(Section, row.section_id)
-            if sec_of_row is not None and sec_of_row.archived:
-                continue
-            if row.block_id is not None:
-                blk_of_row = db.get(Block, row.block_id)
-                if blk_of_row is not None and blk_of_row.archived:
+            for col_key, val in cols.items():
+                if col_key not in input_keys:
                     continue
-            row_label = f"{row.group_label} — {row.row_label}" if row and row.group_label else (row.row_label if row else "")
-            save_entry(
-                db,
-                tmpl.id,
-                row_id,
-                col_key,
-                day,
-                v,
-                user.id,
-                username=user.username,
-                dept_id=dept_id,
-                row_label=row_label,
-            )
-            n += 1
-    db.commit()
+                try:
+                    v = float(val)
+                except (TypeError, ValueError):
+                    v = 0.0
+                row = db.get(RptRow, row_id)
+                # bỏ qua dòng không tồn tại hoặc đã ngừng (kể cả thuộc mục/nhóm đã ngừng)
+                if row is None or row.archived:
+                    continue
+                sec_of_row = db.get(Section, row.section_id)
+                if sec_of_row is not None and sec_of_row.archived:
+                    continue
+                if row.block_id is not None:
+                    blk_of_row = db.get(Block, row.block_id)
+                    if blk_of_row is not None and blk_of_row.archived:
+                        continue
+                row_label = (
+                    f"{row.group_label} — {row.row_label}"
+                    if row and row.group_label
+                    else (row.row_label if row else "")
+                )
+                save_entry(
+                    db,
+                    tmpl.id,
+                    row_id,
+                    col_key,
+                    day,
+                    v,
+                    user.id,
+                    username=user.username,
+                    dept_id=dept_id,
+                    row_label=row_label,
+                )
+                n += 1
+        return n
+
+    n = _apply()
+    try:
+        db.commit()
+    except IntegrityError:
+        # 2 request chèn cùng ô cùng lúc (bấm Lưu 2 lần) → thử lại:
+        # lần 2 các ô đã tồn tại → đi nhánh UPDATE, không mất số liệu
+        db.rollback()
+        n = _apply()
+        db.commit()
     return {"ok": True, "saved": n, "date": ngay}
 
 
@@ -148,5 +174,8 @@ def nhap_copy(
             date.fromisoformat(ngay),
             user.id,
         )
-        db.commit()
+        try:
+            db.commit()
+        except IntegrityError:
+            db.rollback()  # bản sao chép đầu tiên đã ghi — bỏ qua lần trùng
     return RedirectResponse(f"/nhap?khoa={dept_id}&ngay={ngay}", status_code=303)

@@ -127,6 +127,15 @@ function initEntryGrid() {
   if (form) {
     form.addEventListener("submit", function (e) {
       e.preventDefault();
+      // chống bấm Lưu 2 lần liên tiếp (double-click) — nguyên nhân gây lỗi 500
+      if (form.dataset.saving === "1") return;
+      form.dataset.saving = "1";
+      var btn = document.getElementById("btnSave");
+      if (btn) {
+        btn.disabled = true;
+        btn.dataset.txt = btn.textContent;
+        btn.textContent = "⏳ Đang lưu...";
+      }
       var payload = {};
       document.querySelectorAll(".cell-input").forEach(function (inp) {
         var r = inp.dataset.row;
@@ -135,6 +144,13 @@ function initEntryGrid() {
       });
       var status = document.getElementById("saveStatus");
       status.textContent = "Đang lưu...";
+      function done() {
+        form.dataset.saving = "";
+        if (btn) {
+          btn.disabled = false;
+          btn.textContent = btn.dataset.txt;
+        }
+      }
       var body = new URLSearchParams(new FormData(form));
       body.set("payload", JSON.stringify(payload));
       fetch("/nhap", { method: "POST", body: body })
@@ -143,6 +159,7 @@ function initEntryGrid() {
           return r.json();
         })
         .then(function (data) {
+          done();
           status.innerHTML =
             '<span style="color:var(--ok);font-weight:700">✓ Đã lưu ' +
             data.saved +
@@ -151,7 +168,11 @@ function initEntryGrid() {
             "</span>";
         })
         .catch(function (err) {
-          status.innerHTML = '<span style="color:var(--danger);font-weight:700">Lỗi: ' + err + "</span>";
+          done();
+          status.innerHTML =
+            '<span style="color:var(--danger);font-weight:700">Không lưu được (' +
+            err +
+            ") — thử lại. Nếu lặp nhiều lần, chụp màn hình gửi IT.</span>";
         });
     });
   }
