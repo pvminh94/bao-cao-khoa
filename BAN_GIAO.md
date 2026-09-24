@@ -236,6 +236,22 @@ sudo certbot --nginx -d baocao.benhvien.vn
 
 ---
 
+## 5b. Quy tắc thay đổi cấu trúc mẫu (bảo toàn số liệu lịch sử)
+
+Từ phiên bản này, **"xóa" = "ngừng sử dụng"** (ẩn đi, KHÔNG xóa số liệu):
+
+- **Ngừng** dòng / nhóm dòng (vd "1.1. Trong giờ") / mục / đối tượng (cột) → ẩn khỏi
+  form nhập và báo cáo mới, nhưng **số liệu đã nhập giữ nguyên trong CSDL**.
+- Báo cáo theo khoảng thời gian có dữ liệu của phần đã ngừng → hiển thị thêm bảng
+  **"Số liệu thuộc dòng/mục đã ngừng"** (HTML/Excel/PDF) → tổng hợp toàn viện vẫn chính xác.
+- Có thể **Khôi phục** bất kỳ lúc nào trong Cấu hình (phần mờ "đã ngừng").
+- **Đổi tên** dòng/mục/nhóm chỉ nên dùng để đổi cách GỌI (số liệu gắn theo dòng, giữ nguyên).
+  Nếu đổi cả Ý NGHĨA: thêm dòng mới + ngừng dòng cũ, đừng đổi tên dòng cũ.
+- Nhóm dòng (vd "1.1. Trong giờ / 1.2. Ngoài giờ") giờ quản lý được đầy đủ trong
+  Cấu hình: thêm / đổi tên / lên-xuống / ngừng / khôi phục.
+- CSDL tạo từ phiên bản cũ được **tự nâng cấp** (thêm cột) khi khởi động ứng dụng —
+  không cần thao tác gì.
+
 ## 6. Giới hạn đã biết & hướng xử lý
 
 | Vấn đề | Xử lý |

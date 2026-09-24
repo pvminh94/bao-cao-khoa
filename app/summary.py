@@ -55,6 +55,22 @@ def _collect(report: dict | None) -> dict:
             tu_vong += total
         if "hiện còn" in lab:
             hien_con += total
+    # số liệu thuộc cấu trúc ĐÃ NGỪNG vẫn tính đầy đủ vào tổng
+    for it in report.get("legacy") or []:
+        lab = (it.get("row_label") or "").lower()
+        total = float(it.get("total") or 0)
+        if it.get("agg") == "sum":
+            tong += total
+        if "khám" in lab:
+            kham += total
+        if lab == "vào" or lab.startswith("vào"):
+            vao += total
+        if "ra viện" in lab or lab == "ra":
+            ra += total
+        if "tử vong" in lab:
+            tu_vong += total
+        if "hiện còn" in lab:
+            hien_con += total
     return {
         "kham": kham, "vao": vao, "ra": ra,
         "tu_vong": tu_vong, "hien_con": hien_con, "tong_chi_tieu": tong,

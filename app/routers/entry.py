@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 
 from ..database import get_db
 from ..deps import get_current_user, resolve_dept_id
-from ..models import Entry, RptRow, User
+from ..models import Block, Entry, RptRow, Section, User
 from ..report import (
     copy_day,
     get_structure,
@@ -102,6 +102,16 @@ def nhap_save(
             except (TypeError, ValueError):
                 v = 0.0
             row = db.get(RptRow, row_id)
+            # bỏ qua dòng không tồn tại hoặc đã ngừng (kể cả thuộc mục/nhóm đã ngừng)
+            if row is None or row.archived:
+                continue
+            sec_of_row = db.get(Section, row.section_id)
+            if sec_of_row is not None and sec_of_row.archived:
+                continue
+            if row.block_id is not None:
+                blk_of_row = db.get(Block, row.block_id)
+                if blk_of_row is not None and blk_of_row.archived:
+                    continue
             row_label = f"{row.group_label} — {row.row_label}" if row and row.group_label else (row.row_label if row else "")
             save_entry(
                 db,

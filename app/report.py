@@ -80,25 +80,36 @@ def list_departments(db: Session, user_role: str, user_dept_id: int | None):
     return out
 
 
-def get_structure(db: Session, tmpl_id: int) -> dict:
+def get_structure(db: Session, tmpl_id: int, include_archived: bool = False) -> dict:
+    """Cấu trúc mẫu. Mặc định chỉ trả phần ĐANG DÙNG (archived=False);
+    truyền include_archived=True (trang cấu hình) để thấy cả phần đã ngừng."""
+    sec_f = [Section.tmpl_id == tmpl_id]
+    blk_f = [Section.tmpl_id == tmpl_id]
+    row_f = [Section.tmpl_id == tmpl_id]
+    col_f = [ColumnDef.tmpl_id == tmpl_id]
+    if not include_archived:
+        sec_f.append(Section.archived.is_(False))
+        blk_f.append(Block.archived.is_(False))
+        row_f.append(RptRow.archived.is_(False))
+        col_f.append(ColumnDef.archived.is_(False))
     sections = db.scalars(
-        select(Section).where(Section.tmpl_id == tmpl_id).order_by(Section.sort_order, Section.id)
+        select(Section).where(*sec_f).order_by(Section.sort_order, Section.id)
     ).all()
     cols = db.scalars(
         select(ColumnDef)
-        .where(ColumnDef.tmpl_id == tmpl_id)
+        .where(*col_f)
         .order_by(ColumnDef.sort_order, ColumnDef.id)
     ).all()
     blocks = db.scalars(
         select(Block)
         .join(Section, Block.section_id == Section.id)
-        .where(Section.tmpl_id == tmpl_id)
+        .where(*blk_f)
         .order_by(Block.sort_order, Block.id)
     ).all()
     rows = db.scalars(
         select(RptRow)
         .join(Section, RptRow.section_id == Section.id)
-        .where(Section.tmpl_id == tmpl_id)
+        .where(*row_f)
         .order_by(RptRow.sort_order, RptRow.id)
     ).all()
 
@@ -114,12 +125,19 @@ def get_structure(db: Session, tmpl_id: int) -> dict:
     sec_out = []
     for s in sections:
         sec_blocks = [
-            {"id": b.id, "label": b.label, "rows": rows_by_block.get(b.id, [])}
+            {"id": b.id, "label": b.label, "archived": b.archived, "rows": rows_by_block.get(b.id, [])}
             for b in blocks_by_sec.get(s.id, [])
         ]
         loose = [r for r in rows_by_sec.get(s.id, []) if r.block_id is None]
         sec_out.append(
-            {"id": s.id, "title": s.title, "sort_order": s.sort_order, "blocks": sec_blocks, "loose_rows": loose}
+            {
+                "id": s.id,
+                "title": s.title,
+                "sort_order": s.sort_order,
+                "archived": s.archived,
+                "blocks": sec_blocks,
+                "loose_rows": loose,
+            }
         )
     return {"sections": sec_out, "columns": list(cols)}
 
@@ -173,18 +191,33 @@ def load_values(
     return out
 
 
+def _grand_key(cols) -> str | None:
+    """Chọn cột 'tổng đại' để lấy tổng của 1 dòng: ưu tiên col_key='tong', else calc cuối."""
+    for c in cols:
+        if c.col_key == "tong":
+            return "tong"
+    calcs = [c for c in cols if c.kind == "calc"]
+    return calcs[-1].col_key if calcs else None
+
+
 def build_report(db: Session, dept_id: int, date_from: date, date_to: date) -> dict | None:
     dept = db.get(Department, dept_id)
     if not dept or not dept.active:
         return None
     tmpl = get_template_for_dept(db, dept_id)
     if not tmpl:
-        return {"dept": dept, "template": None, "structure": None, "values": {}}
+        return {"dept": dept, "template": None, "structure": None, "values": {}, "legacy": []}
 
-    structure = get_structure(db, tmpl.id)
-    cols = structure["columns"]
-    input_keys = [c.col_key for c in cols if c.kind == "input"]
-    calc_cols = [c for c in cols if c.kind == "calc"]
+    structure = get_structure(db, tmpl.id)  # chỉ phần ĐANG DÙNG
+    display_cols = structure["columns"]
+    # cột input đã NGỪNG vẫn nạp giá trị để công thức calc tham chiếu không sai
+    archived_cols = db.scalars(
+        select(ColumnDef).where(ColumnDef.tmpl_id == tmpl.id, ColumnDef.archived.is_(True))
+    ).all()
+    input_keys = [c.col_key for c in display_cols if c.kind == "input"] + [
+        c.col_key for c in archived_cols if c.kind == "input"
+    ]
+    calc_cols = [c for c in display_cols if c.kind == "calc"]
     raw = load_values(db, tmpl.id, date_from, date_to, input_keys)
 
     # tính cột calc theo thứ tự sort (công thức tham chiếu key input/đã tính)
@@ -196,17 +229,64 @@ def build_report(db: Session, dept_id: int, date_from: date, date_to: date) -> d
         for r in sec["loose_rows"]:
             row_ids.add(r.id)
     for rid in row_ids:
-        vals = {c.col_key: raw.get((rid, c.col_key), 0.0) for c in cols if c.kind == "input"}
+        vals = {k: raw.get((rid, k), 0.0) for k in input_keys}
         for c in sorted(calc_cols, key=lambda x: (x.sort_order, x.id)):
             v = _calc_formula(c.formula, vals)
             vals[c.col_key] = v
             raw[(rid, c.col_key)] = v
+
+    # ---- Số liệu thuộc cấu trúc ĐÃ NGỪNG nhưng kỳ này còn số liệu ----
+    all_secs = db.scalars(select(Section).where(Section.tmpl_id == tmpl.id)).all()
+    all_blks = db.scalars(
+        select(Block).join(Section, Block.section_id == Section.id).where(Section.tmpl_id == tmpl.id)
+    ).all()
+    all_rows = db.scalars(
+        select(RptRow).join(Section, RptRow.section_id == Section.id).where(Section.tmpl_id == tmpl.id)
+    ).all()
+    dead_sec = {s.id for s in all_secs if s.archived}
+    dead_blk = {b.id for b in all_blks if b.archived}
+    sec_title = {s.id: s.title for s in all_secs}
+    blk_label = {b.id: b.label for b in all_blks}
+    grand = _grand_key(display_cols)
+
+    legacy = []
+    for r in all_rows:
+        if r.id in row_ids:  # đang dùng
+            continue
+        is_dead = r.archived or r.section_id in dead_sec or (r.block_id is not None and r.block_id in dead_blk)
+        if not is_dead:
+            continue
+        vals = {k: raw.get((r.id, k), 0.0) for k in input_keys}
+        for c in sorted(calc_cols, key=lambda x: (x.sort_order, x.id)):
+            v = _calc_formula(c.formula, vals)
+            vals[c.col_key] = v  # calc sau có thể tham chiếu calc trước (vd: bhyt_tong)
+            raw[(r.id, c.col_key)] = v
+        cells = {c.col_key: raw.get((r.id, c.col_key), 0.0) for c in display_cols}
+        if not any(abs(float(v)) > 1e-9 for v in cells.values()):
+            continue  # kỳ này không còn số liệu → không hiển thị
+        if grand:
+            total = float(cells.get(grand, 0) or 0)
+        else:
+            total = float(sum(cells.get(c.col_key, 0) or 0 for c in display_cols if c.kind == "input"))
+        legacy.append(
+            {
+                "row_id": r.id,
+                "section_title": sec_title.get(r.section_id, ""),
+                "block_label": blk_label.get(r.block_id, "") if r.block_id else "",
+                "group_label": r.group_label,
+                "row_label": r.row_label,
+                "agg": r.agg,
+                "cells": cells,
+                "total": total,
+            }
+        )
 
     return {
         "dept": dept,
         "template": tmpl,
         "structure": structure,
         "values": raw,
+        "legacy": legacy,
         "date_from": date_from,
         "date_to": date_to,
     }

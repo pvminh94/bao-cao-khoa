@@ -109,6 +109,29 @@
     </tbody>
   </table>
 
+  {% if report.legacy %}
+  <div class="notice warn" style="margin-top:1rem">
+    ⚠ Kỳ này có số liệu thuộc <strong>{{ report.legacy|length }}</strong> dòng/mục
+    <strong>đã ngừng sử dụng</strong> trong cấu hình mẫu — số liệu vẫn được giữ nguyên và
+    tính đầy đủ vào thống kê/tổng hợp:
+  </div>
+  <table class="mini-table">
+    <thead>
+      <tr><th>Mục</th><th>Nhóm</th><th>Dòng (đã ngừng)</th>{% for c in cols %}<th class="num">{{ c.label }}</th>{% endfor %}</tr>
+    </thead>
+    <tbody>
+      {% for it in report.legacy %}
+      <tr style="opacity:.75">
+        <td>{{ it.section_title }}</td>
+        <td>{{ it.block_label }}</td>
+        <td>{% if it.group_label %}{{ it.group_label }} — {% endif %}{{ it.row_label }} <span class="tag">đã ngừng</span></td>
+        {% for c in cols %}<td class="num">{{ it.cells.get(c.col_key, 0) | int }}</td>{% endfor %}
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+
   <footer class="report-foot">
     <div class="foot-date">{{ today|vnfull }}</div>
   </footer>

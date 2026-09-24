@@ -162,6 +162,40 @@ def export_report_pdf(report: dict, period_label: str) -> bytes:
     tbl.setStyle(TableStyle(style_cmds))
     story.append(tbl)
 
+    # ---- Số liệu thuộc cấu trúc đã ngừng ----
+    legacy = report.get("legacy") or []
+    if legacy:
+        story.append(Spacer(1, 10))
+        story.append(
+            Paragraph(
+                "Số liệu thuộc dòng/mục ĐÃ NGỪNG SỬ DỤNG (vẫn được giữ và tính đầy đủ vào thống kê):",
+                bold_st,
+            )
+        )
+        ldata = [
+            [Paragraph("<b>Mục / Nhóm / Dòng (đã ngừng)</b>", left_st)]
+            + [Paragraph(f"<b>{(c.group_label + ':' + c.label) if c.group_label else c.label}</b>", center_st) for c in all_cols]
+        ]
+        for it in legacy:
+            parts = [p for p in (it.get("section_title"), it.get("block_label"), it.get("group_label")) if p]
+            lab = " — ".join(parts + [it.get("row_label", "")])
+            ldata.append([Paragraph(lab, left_st)] + [_fmt(it["cells"].get(c.col_key, 0)) for c in all_cols])
+        ltbl = Table(ldata, colWidths=[w_label + w_stt] + [w_cell] * n_cols, repeatRows=1)
+        ltbl.setStyle(
+            TableStyle(
+                [
+                    ("FONTNAME", (0, 0), (-1, -1), _FONT),
+                    ("FONTSIZE", (0, 0), (-1, -1), 8),
+                    ("GRID", (0, 0), (-1, -1), 0.4, colors.grey),
+                    ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                    ("ALIGN", (1, 0), (-1, -1), "CENTER"),
+                    ("TOPPADDING", (0, 0), (-1, -1), 2),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
+                ]
+            )
+        )
+        story.append(ltbl)
+
     today = date.today()
     story.append(Spacer(1, 14))
     story.append(

@@ -46,7 +46,35 @@ def get_db() -> Generator[Session, None, None]:
 
 
 def init_models() -> None:
-    """Tạo bảng nếu chưa có."""
+    """Tạo bảng nếu chưa có + nâng cấp nhẹ (thêm cột) cho DB phiên bản cũ."""
     from . import models  # noqa: F401
 
     Base.metadata.create_all(bind=engine)
+    _migrate_light()
+
+
+def _migrate_light() -> None:
+    """DB tạo từ phiên bản cũ thiếu cột 'archived' → tự thêm (SQLite & PostgreSQL).
+
+    Xóa dòng/mục/nhóm/đối tượng = chỉ ĐÁNH DẤU archived, không xóa số liệu →
+    thống kê các kỳ trước vẫn chính xác.
+    """
+    from sqlalchemy import inspect, text
+
+    insp = inspect(engine)
+    dflt = "FALSE" if engine.dialect.name == "postgresql" else "0"
+    plans = [
+        ("sections", "archived"),
+        ("blocks", "archived"),
+        ("rpt_rows", "archived"),
+        ("columns_def", "archived"),
+    ]
+    with engine.begin() as conn:
+        for tbl, col in plans:
+            if tbl not in insp.get_table_names():
+                continue
+            cols = {c["name"] for c in insp.get_columns(tbl)}
+            if col not in cols:
+                conn.execute(
+                    text(f"ALTER TABLE {tbl} ADD COLUMN {col} BOOLEAN NOT NULL DEFAULT {dflt}")
+                )

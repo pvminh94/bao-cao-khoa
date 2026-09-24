@@ -89,6 +89,8 @@ class Section(Base):
     )
     title: Mapped[str] = mapped_column(String(200))
     sort_order: Mapped[int] = mapped_column(Integer, default=0)
+    # "ngừng sử dụng" thay vì xóa — bảo toàn số liệu lịch sử
+    archived: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
 
     template: Mapped[ReportTemplate] = relationship("ReportTemplate", back_populates="sections")
     blocks: Mapped[list[Block]] = relationship(
@@ -108,6 +110,7 @@ class Block(Base):
     )
     label: Mapped[str] = mapped_column(String(120))
     sort_order: Mapped[int] = mapped_column(Integer, default=0)
+    archived: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
 
     section: Mapped[Section] = relationship("Section", back_populates="blocks")
     rows: Mapped[list[RptRow]] = relationship(
@@ -129,6 +132,7 @@ class RptRow(Base):
     row_label: Mapped[str] = mapped_column(String(160))
     agg: Mapped[str] = mapped_column(String(8), default="sum")  # sum | first | last
     sort_order: Mapped[int] = mapped_column(Integer, default=0)
+    archived: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
 
     section: Mapped[Section] = relationship("Section", back_populates="rows")
     block: Mapped[Block | None] = relationship("Block", back_populates="rows")
@@ -150,6 +154,7 @@ class ColumnDef(Base):
     kind: Mapped[str] = mapped_column(String(8), default="input")  # input | calc
     formula: Mapped[str] = mapped_column(String(200), default="")  # calc: hs+tq+te
     sort_order: Mapped[int] = mapped_column(Integer, default=0)
+    archived: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
 
     template: Mapped[ReportTemplate] = relationship(
         "ReportTemplate", back_populates="columns_"

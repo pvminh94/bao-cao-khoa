@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 
 from ..database import get_db
 from ..deps import require_admin
-from ..models import AuditLog, ColumnDef, Department, ReportTemplate, RptRow, Section, User
+from ..models import AuditLog, Block, ColumnDef, Department, ReportTemplate, RptRow, Section, User
 from ..report import get_structure, slugify_col_key
 from ..security import hash_password
 
@@ -69,7 +69,7 @@ def _admin_payload(db: Session) -> list[dict]:
             .where(ReportTemplate.dept_id == d.id, ReportTemplate.active.is_(True))
             .limit(1)
         )
-        st = get_structure(db, tmpl.id) if tmpl else {"sections": [], "columns": []}
+        st = get_structure(db, tmpl.id, include_archived=True) if tmpl else {"sections": [], "columns": []}
         out.append({"dept": d, "tmpl": tmpl, "structure": st})
     return out
 
@@ -207,8 +207,127 @@ def xoa_muc(
 ):
     sec = db.get(Section, sec_id)
     if sec:
-        db.delete(sec)
+        # NGỪNG sử dụng thay vì xóa — giữ nguyên số liệu lịch sử
+        sec.archived = True
         db.commit()
+    return RedirectResponse("/cau-hinh", status_code=303)
+
+
+@router.post("/muc/{sec_id}/khoi-phuc")
+def khoi_phuc_muc(
+    sec_id: int,
+    user: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    sec = db.get(Section, sec_id)
+    if sec:
+        sec.archived = False
+        db.commit()
+    return RedirectResponse("/cau-hinh", status_code=303)
+
+
+# ---------------- nhóm dòng (Block: vd "1.1. Trong giờ") ----------------
+@router.post("/nhom")
+def them_nhom(
+    section_id: int = Form(...),
+    label: str = Form(...),
+    user: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    sec = db.get(Section, section_id)
+    if not sec:
+        raise HTTPException(status_code=404)
+    mx = (
+        db.scalar(
+            select(Block.sort_order)
+            .where(Block.section_id == section_id)
+            .order_by(Block.sort_order.desc())
+            .limit(1)
+        )
+        or 0
+    )
+    db.add(Block(section_id=section_id, label=label.strip(), sort_order=mx + 1))
+    db.commit()
+    return RedirectResponse("/cau-hinh", status_code=303)
+
+
+@router.post("/nhom/{b_id}/sua")
+def sua_nhom(
+    b_id: int,
+    label: str = Form(...),
+    user: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    b = db.get(Block, b_id)
+    if b:
+        b.label = label.strip()
+        db.commit()
+    return RedirectResponse("/cau-hinh", status_code=303)
+
+
+@router.post("/nhom/{b_id}/xoa")
+def xoa_nhom(
+    b_id: int,
+    user: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    b = db.get(Block, b_id)
+    if b:
+        b.archived = True  # ngừng dùng — số liệu giữ nguyên
+        db.commit()
+    return RedirectResponse("/cau-hinh", status_code=303)
+
+
+@router.post("/nhom/{b_id}/khoi-phuc")
+def khoi_phuc_nhom(
+    b_id: int,
+    user: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    b = db.get(Block, b_id)
+    if b:
+        b.archived = False
+        db.commit()
+    return RedirectResponse("/cau-hinh", status_code=303)
+
+
+@router.post("/nhom/{b_id}/len")
+def len_nhom(
+    b_id: int,
+    user: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    b = db.get(Block, b_id)
+    if b:
+        prev = db.scalar(
+            select(Block)
+            .where(Block.section_id == b.section_id, Block.sort_order < b.sort_order)
+            .order_by(Block.sort_order.desc())
+            .limit(1)
+        )
+        if prev:
+            prev.sort_order, b.sort_order = b.sort_order, prev.sort_order
+            db.commit()
+    return RedirectResponse("/cau-hinh", status_code=303)
+
+
+@router.post("/nhom/{b_id}/xuong")
+def xuong_nhom(
+    b_id: int,
+    user: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    b = db.get(Block, b_id)
+    if b:
+        nxt = db.scalar(
+            select(Block)
+            .where(Block.section_id == b.section_id, Block.sort_order > b.sort_order)
+            .order_by(Block.sort_order.asc())
+            .limit(1)
+        )
+        if nxt:
+            nxt.sort_order, b.sort_order = b.sort_order, nxt.sort_order
+            db.commit()
     return RedirectResponse("/cau-hinh", status_code=303)
 
 
@@ -272,7 +391,20 @@ def xoa_dong(
 ):
     r = db.get(RptRow, row_id)
     if r:
-        db.delete(r)
+        r.archived = True  # ngừng dùng — số liệu lịch sử giữ nguyên
+        db.commit()
+    return RedirectResponse("/cau-hinh", status_code=303)
+
+
+@router.post("/dong/{row_id}/khoi-phuc")
+def khoi_phuc_dong(
+    row_id: int,
+    user: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    r = db.get(RptRow, row_id)
+    if r:
+        r.archived = False
         db.commit()
     return RedirectResponse("/cau-hinh", status_code=303)
 
@@ -376,10 +508,21 @@ def xoa_doi_tuong(
 ):
     c = db.get(ColumnDef, col_id)
     if c:
-        if c.kind == "calc":
-            # chặn xóa cột calc đang có thể được tham chiếu — cảnh báo bằng cách vẫn cho xóa
-            pass
-        db.delete(c)
+        # ngừng dùng thay vì xóa — số liệu cũ vẫn còn và vẫn tính cho kỳ cũ
+        c.archived = True
+        db.commit()
+    return RedirectResponse("/cau-hinh?tab=doi-tuong", status_code=303)
+
+
+@router.post("/doi-tuong/{col_id}/khoi-phuc")
+def khoi_phuc_doi_tuong(
+    col_id: int,
+    user: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    c = db.get(ColumnDef, col_id)
+    if c:
+        c.archived = False
         db.commit()
     return RedirectResponse("/cau-hinh?tab=doi-tuong", status_code=303)
 

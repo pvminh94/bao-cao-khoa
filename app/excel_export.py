@@ -156,6 +156,27 @@ def export_report_xlsx(report: dict, period_label: str) -> bytes:
             stt += 1
             write_data_row(r.group_label, r.row_label, r.id, stt)
 
+    # ---- Số liệu thuộc cấu trúc đã ngừng (vẫn tính đầy đủ) ----
+    legacy = report.get("legacy") or []
+    if legacy:
+        row_ptr += 1
+        ws.merge_cells(start_row=row_ptr, start_column=1, end_row=row_ptr, end_column=total_cols)
+        c = ws.cell(row_ptr, 1, "Số liệu thuộc dòng/mục ĐÃ NGỪNG SỬ DỤNG (vẫn được giữ và tính đầy đủ)")
+        c.font = Font(bold=True, italic=True, color="B45F06")
+        row_ptr += 1
+        for it in legacy:
+            parts = [p for p in (it.get("section_title"), it.get("block_label"), it.get("group_label")) if p]
+            label_txt = " — ".join(parts + [it.get("row_label", "")])
+            ws.cell(row_ptr, 1).border = BORDER_DOT
+            ws.cell(row_ptr, 2, label_txt)
+            for k, ck in enumerate(col_keys_order):
+                v = it["cells"].get(ck, 0)
+                cell = ws.cell(row_ptr, 3 + k, int(v) if float(v).is_integer() else v)
+                cell.alignment = Alignment(horizontal="center")
+                cell.border = BORDER_DOT
+            ws.cell(row_ptr, 2).border = BORDER_DOT
+            row_ptr += 1
+
     row_ptr += 2
     today = date.today()
     ws.merge_cells(start_row=row_ptr, start_column=1, end_row=row_ptr, end_column=total_cols)
