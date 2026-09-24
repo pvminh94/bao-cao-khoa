@@ -16,6 +16,17 @@ DB_PASS="${DB_PASS:-baocao_change_me}"
 ADMIN_USER="${ADMIN_USER:-admin}"
 ADMIN_PASS="${ADMIN_PASS:-Admin@123}"
 
+# Mã hoá mật khẩu để nhúng an toàn vào DATABASE_URL (chống lỗi ký tự @ : / ! # ...)
+db_pass_enc() {
+  python3 -c 'import sys,urllib.parse as u; print(u.quote_plus(sys.argv[1]))' "$1"
+}
+# Escape nháy đơn cho SQL literal (chuẩn SQL: ' → '') — an toàn với mọi ký tự mật khẩu
+sql_quote() { printf "'%s'" "${1//\'/\'\'}"; }
+# Tạo/đổi mật khẩu role Postgres (psql -c KHÔNG thay biến :'pwd' → tự escape bên shell)
+pg_set_pass() {
+  sudo -u postgres psql -c "SET password_encryption='scram-sha-256'; ALTER USER ${DB_USER} WITH PASSWORD $(sql_quote "$1");"
+}
+
 if [[ $EUID -ne 0 ]]; then
   echo "Hãy chạy với sudo:  sudo bash scripts/install-ubuntu.sh"
   exit 1
@@ -52,10 +63,10 @@ echo "==> [3/7] PostgreSQL: tạo DB + user..."
 service postgresql start >/dev/null 2>&1 || systemctl start postgresql
 # LUÔN đồng bộ mật khẩu role với DB_PASS (idempotent) — tránh lệch .env ↔ Postgres
 if sudo -u postgres psql -tc "SELECT 1 FROM pg_roles WHERE rolname='${DB_USER}'" | grep -q 1; then
-  sudo -u postgres psql -c "ALTER USER ${DB_USER} WITH PASSWORD '${DB_PASS}';"
+  pg_set_pass "$DB_PASS"
   echo "    Đã cập nhật mật khẩu role ${DB_USER} theo DB_PASS."
 else
-  sudo -u postgres psql -c "CREATE USER ${DB_USER} WITH PASSWORD '${DB_PASS}';"
+  sudo -u postgres psql -c "SET password_encryption='scram-sha-256'; CREATE USER ${DB_USER} WITH PASSWORD $(sql_quote "$DB_PASS");"
   echo "    Đã tạo role ${DB_USER}."
 fi
 sudo -u postgres psql -tc "SELECT 1 FROM pg_database WHERE datname='${DB_NAME}'" | grep -q 1 \
@@ -70,13 +81,14 @@ python3 -m venv "$APP_DIR/.venv"
 "$APP_DIR/.venv/bin/pip" install -q -r "$APP_DIR/requirements.txt"
 
 echo "==> [5/7] Viết file .env..."
+DB_PASS_ENC="$(db_pass_enc "$DB_PASS")"
 # LUÔN ensure DATABASE_URL khớp DB_PASS hiện tại (giữ SECRET_KEY cũ nếu đã có)
 if [[ ! -f "$APP_DIR/.env" ]]; then
   SECRET=$(python3 -c "import secrets; print(secrets.token_urlsafe(48))")
   cat > "$APP_DIR/.env" <<EOF
 APP_NAME=Bao cao cong tac khoa
 SECRET_KEY=${SECRET}
-DATABASE_URL=postgresql+psycopg2://${DB_USER}:${DB_PASS}@127.0.0.1:5432/${DB_NAME}
+DATABASE_URL=postgresql+psycopg2://${DB_USER}:${DB_PASS_ENC}@127.0.0.1:5432/${DB_NAME}
 SESSION_HOURS=12
 HOST=127.0.0.1
 PORT=${APP_PORT}
@@ -84,17 +96,14 @@ SEED_ADMIN_USER=${ADMIN_USER}
 SEED_ADMIN_PASS=${ADMIN_PASS}
 EOF
 else
-  # cập nhật lại dòng DATABASE_URL (and PORT/ADMIN seed) cho khớp DB_PASS mới
-  NEW_URL="postgresql+psycopg2://${DB_USER}:${DB_PASS}@127.0.0.1:5432/${DB_NAME}"
+  # cập nhật lại dòng DATABASE_URL cho khớp DB_PASS mới (đã percent-encode → sed-safe)
+  NEW_URL="postgresql+psycopg2://${DB_USER}:${DB_PASS_ENC}@127.0.0.1:5432/${DB_NAME}"
   if grep -q '^DATABASE_URL=' "$APP_DIR/.env"; then
-    # escape ký tự đặc biệt của sed: \ & |
-    ESC_URL=$(printf '%s' "$NEW_URL" | sed -e 's/[\\&|]/\\&/g')
-    sed -i "s|^DATABASE_URL=.*|DATABASE_URL=${ESC_URL}|" "$APP_DIR/.env"
+    sed -i "s|^DATABASE_URL=.*|DATABASE_URL=${NEW_URL}|" "$APP_DIR/.env"
   else
     echo "DATABASE_URL=${NEW_URL}" >> "$APP_DIR/.env"
   fi
-  grep -q '^PORT=' "$APP_DIR/.env" \
-    || echo "PORT=${APP_PORT}" >> "$APP_DIR/.env"
+  grep -q '^PORT=' "$APP_DIR/.env" || echo "PORT=${APP_PORT}" >> "$APP_DIR/.env"
   echo "    Đã đồng bộ DATABASE_URL trong .env với DB_PASS."
 fi
 chmod 600 "$APP_DIR/.env"
@@ -110,9 +119,10 @@ systemctl enable bao-cao-khoa >/dev/null
 chown -R "$APP_USER:$APP_USER" "$APP_DIR"
 setfacl -R -m u:$APP_USER:rwx -m u:www-data:r-x "$APP_DIR" 2>/dev/null || true
 
-# init DB + seed + admin
-# BẮT BUỘC cd vào APP_DIR: `python -m app.cli` cần cwd chứa package `app/`
-# (sudo -u baocao không inherit cwd của bạn nếu ngoài /opt — hay gặp ModuleNotFoundError)
+# ----------------------------------------------------------------------------
+# [7/7] Kiểm tra kết nối DB bằng ĐÚNG DATABASE_URL trong .env, tự chữa nếu lỗi,
+#       rồi mới init-db + create-admin (in rõ nguyên nhân thật khi thất bại)
+# ----------------------------------------------------------------------------
 echo "==> [7/7] Khởi tạo CSDL & tài khoản admin..."
 if [[ ! -d "$APP_DIR/app" ]]; then
   echo "    ❌ Không thấy $APP_DIR/app — mã nguồn chưa được copy đúng."
@@ -120,6 +130,104 @@ if [[ ! -d "$APP_DIR/app" ]]; then
   exit 1
 fi
 cd "$APP_DIR"
+
+check_db() {
+  "$APP_DIR/.venv/bin/python" - <<'PY'
+import sys
+from pathlib import Path
+from sqlalchemy import create_engine, text
+
+url = None
+env = Path(".env")
+if env.exists():
+    for line in env.read_text().splitlines():
+        if line.startswith("DATABASE_URL="):
+            url = line.split("=", 1)[1].strip()
+            break
+if not url:
+    print("    ✗ .env không có DATABASE_URL")
+    sys.exit(2)
+try:
+    eng = create_engine(url, pool_pre_ping=True, connect_args={"connect_timeout": 5})
+    with eng.connect() as c:
+        v = c.execute(text("select version()")).scalar()
+        print("    ✓ Kết nối DB OK —", (v or "").split(",")[0])
+except Exception as e:
+    cand = [s.strip() for s in (str(getattr(e, "orig", "") or "") + "\n" + str(e)).splitlines() if s.strip()]
+    msg = "(không rõ)"
+    for s in cand:  # ưu tiên dòng nêu lý do thật
+        if any(k in s for k in ("FATAL", "refused", "could not", "does not exist", "timeout", "no pg_hba")):
+            msg = s
+            break
+    print("    ✗ KẾT NỐI DB THẤT BẠI →", msg)
+    sys.exit(1)
+PY
+}
+
+heal_db() {
+  echo "    --- Chẩn đoán PostgreSQL ---"
+  pg_isready -h 127.0.0.1 -p 5432 || true
+  pg_lsclusters 2>/dev/null || true
+
+  # (a) Postgres chạy chưa / có lắng nghe 5432 không?
+  service postgresql start >/dev/null 2>&1 || systemctl start postgresql || true
+  sleep 1
+  if ! pg_isready -h 127.0.0.1 -p 5432 >/dev/null 2>&1; then
+    echo "    ✗ Postgres KHÔNG lắng nghe 127.0.0.1:5432"
+    echo "      → Xem 'pg_lsclusters' ở trên: nếu cổng khác 5432 thì sửa DATABASE_URL trong .env"
+    return 1
+  fi
+
+  # (b) Xác thực bằng chính DB_PASS qua TCP (cùng đường đi với ứng dụng)
+  if PGPASSWORD="$DB_PASS" psql -h 127.0.0.1 -p 5432 -U "$DB_USER" -d "$DB_NAME" \
+       -c "SELECT 1;" >/dev/null 2>&1; then
+    echo "    ✓ psql xác thực OK với DB_PASS"
+    return 0
+  fi
+  echo "    ✗ Xác thực psql thất bại — tiến hành tự sửa..."
+
+  # (c) Đặt lại mật khẩu (cùng session đặt password_encryption=scram-sha-256)
+  pg_set_pass "$DB_PASS" >/dev/null
+
+  # (d) DB + quyền
+  sudo -u postgres psql -tc "SELECT 1 FROM pg_database WHERE datname='${DB_NAME}'" | grep -q 1 \
+    || sudo -u postgres createdb -O "$DB_USER" "$DB_NAME"
+  sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE ${DB_NAME} TO ${DB_USER};" >/dev/null
+  sudo -u postgres psql -d "$DB_NAME" -c "GRANT ALL ON SCHEMA public TO ${DB_USER};" >/dev/null || true
+
+  # (e) pg_hba: nếu dòng host dùng md5 nhưng mật khẩu lưu dạng scram → sửa + reload
+  local HBA
+  HBA="$(sudo -u postgres psql -tAc 'SHOW hba_file;' 2>/dev/null || true)"
+  if [[ -n "$HBA" && -f "$HBA" ]] && grep -Eq '^[^#]*\bmd5\b' "$HBA"; then
+    echo "    • pg_hba.conf dùng md5 — đổi các dòng host sang scram-sha-256 + reload"
+    cp "$HBA" "${HBA}.bak-baocao"
+    sed -i '/^\s*#/!s/\bmd5\b/scram-sha-256/g' "$HBA"
+    systemctl reload postgresql 2>/dev/null || service postgresql reload 2>/dev/null || true
+  fi
+
+  # (f) Thử lại
+  if PGPASSWORD="$DB_PASS" psql -h 127.0.0.1 -p 5432 -U "$DB_USER" -d "$DB_NAME" \
+       -c "SELECT 1;" >/dev/null 2>&1; then
+    echo "    ✓ Đã tự sửa — xác thực OK"
+    return 0
+  fi
+  echo "    ✗ Vẫn thất bại. Lỗi psql thật:"
+  PGPASSWORD="$DB_PASS" psql -h 127.0.0.1 -p 5432 -U "$DB_USER" -d "$DB_NAME" -c "SELECT 1;" || true
+  return 1
+}
+
+DB_OK=0
+for i in 1 2 3; do
+  if check_db; then DB_OK=1; break; fi
+  echo "    (lần $i/3) Tự chẩn đoán & sửa..."
+  heal_db || true
+done
+if [[ $DB_OK -ne 1 ]]; then
+  echo "❌ Không kết nối được PostgreSQL sau khi tự sửa."
+  echo "   Gửi lại toàn bộ output trên cho lập trình viên (đã in đủ nguyên nhân thật)."
+  exit 1
+fi
+
 sudo -u "$APP_USER" env HOME="$APP_DIR" PYTHONPATH="$APP_DIR" \
   "$APP_DIR/.venv/bin/python" -m app.cli init-db
 sudo -u "$APP_USER" env HOME="$APP_DIR" PYTHONPATH="$APP_DIR" \
