@@ -16,15 +16,58 @@ DB_PASS="${DB_PASS:-baocao_change_me}"
 ADMIN_USER="${ADMIN_USER:-admin}"
 ADMIN_PASS="${ADMIN_PASS:-Admin@123}"
 
-# Mã hoá mật khẩu để nhúng an toàn vào DATABASE_URL (chống lỗi ký tự @ : / ! # ...)
-db_pass_enc() {
-  python3 -c 'import sys,urllib.parse as u; print(u.quote_plus(sys.argv[1]))' "$1"
-}
 # Escape nháy đơn cho SQL literal (chuẩn SQL: ' → '') — an toàn với mọi ký tự mật khẩu
 sql_quote() { printf "'%s'" "${1//\'/\'\'}"; }
-# Tạo/đổi mật khẩu role Postgres (psql -c KHÔNG thay biến :'pwd' → tự escape bên shell)
+
+# --- Quản trị PostgreSQL qua ĐÚNG cluster cục bộ ---------------------------
+# VPS có thể có NHIỀU PostgreSQL (VD: ERPNext/Docker chiếm sẵn 5432).
+# Nếu chọn mù theo socket mặc định sẽ sửa instance này mà app kết nối
+# instance khác → "password authentication failed" vĩnh viễn.
+PSQL_ADMIN=(sudo -u postgres psql)
+CREATEDB_ADMIN=(sudo -u postgres createdb)
+PG_CLUSTER=""
+PG_PORT=5432
+
+detect_pg() {
+  service postgresql start >/dev/null 2>&1 || systemctl start postgresql || true
+  sleep 1
+  if command -v pg_lsclusters >/dev/null 2>&1; then
+    local ver name port status
+    while read -r ver name port status _rest; do
+      [[ "$status" == "online" ]] || continue
+      PG_CLUSTER="${ver}/${name}"
+      PG_PORT="$port"
+      break
+    done < <(pg_lsclusters -h | sort -k3 -n)
+  fi
+  if [[ -n "$PG_CLUSTER" ]]; then
+    PSQL_ADMIN=(sudo -u postgres psql --cluster "$PG_CLUSTER")
+    CREATEDB_ADMIN=(sudo -u postgres createdb --cluster "$PG_CLUSTER")
+    if [[ "$PG_PORT" != "5432" ]]; then
+      echo "    ⚠ PostgreSQL cục bộ (cluster ${PG_CLUSTER}) đang nghe port ${PG_PORT}, không phải 5432."
+      echo "      → Ứng dụng sẽ dùng port ${PG_PORT} để tránh đụng service khác đang chiếm 5432."
+    fi
+  else
+    if pg_isready -h 127.0.0.1 -p 5432 >/dev/null 2>&1; then
+      echo "    ❌ Port 5432 có PostgreSQL NHƯNG không phải cluster cục bộ (Docker/service khác?)."
+      echo "       Xử lý 1 trong 2 cách:"
+      echo "       1) Dừng PostgreSQL đó (VD: docker ps && docker stop <container>) rồi chạy lại."
+      echo "       2) Chạy lại với biến DB_PORT trỏ đúng cluster cục bộ sau khi cài/xuất hiện cluster."
+      exit 1
+    fi
+    echo "    ❌ Không tìm thấy PostgreSQL nào (cục bộ lẫn port 5432). Hãy cài: apt install postgresql"
+    exit 1
+  fi
+  # cho phép ép port thủ công khi cần
+  if [[ -n "${DB_PORT:-}" ]]; then
+    PG_PORT="$DB_PORT"
+    echo "    • Dùng DB_PORT chỉ định = ${PG_PORT}"
+  fi
+}
+
+# Đặt lại mật khẩu role trên ĐÚNG cluster đã dò (psql -c không thay :'pwd')
 pg_set_pass() {
-  sudo -u postgres psql -c "SET password_encryption='scram-sha-256'; ALTER USER ${DB_USER} WITH PASSWORD $(sql_quote "$1");"
+  "${PSQL_ADMIN[@]}" -c "SET password_encryption='scram-sha-256'; ALTER USER ${DB_USER} WITH PASSWORD $(sql_quote "$1");"
 }
 
 if [[ $EUID -ne 0 ]]; then
@@ -60,20 +103,20 @@ if [[ "$SRC_DIR" != "$APP_DIR" ]]; then
 fi
 
 echo "==> [3/7] PostgreSQL: tạo DB + user..."
-service postgresql start >/dev/null 2>&1 || systemctl start postgresql
-# LUÔN đồng bộ mật khẩu role với DB_PASS (idempotent) — tránh lệch .env ↔ Postgres
-if sudo -u postgres psql -tc "SELECT 1 FROM pg_roles WHERE rolname='${DB_USER}'" | grep -q 1; then
+detect_pg
+# LUÔN đồng bộ mật khẩu role với DB_PASS trên ĐÚNG cluster (idempotent)
+if "${PSQL_ADMIN[@]}" -tc "SELECT 1 FROM pg_roles WHERE rolname='${DB_USER}'" | grep -q 1; then
   pg_set_pass "$DB_PASS"
-  echo "    Đã cập nhật mật khẩu role ${DB_USER} theo DB_PASS."
+  echo "    Đã cập nhật mật khẩu role ${DB_USER} (cluster ${PG_CLUSTER:-mặc định}, port ${PG_PORT})."
 else
-  sudo -u postgres psql -c "SET password_encryption='scram-sha-256'; CREATE USER ${DB_USER} WITH PASSWORD $(sql_quote "$DB_PASS");"
-  echo "    Đã tạo role ${DB_USER}."
+  "${PSQL_ADMIN[@]}" -c "SET password_encryption='scram-sha-256'; CREATE USER ${DB_USER} WITH PASSWORD $(sql_quote "$DB_PASS");"
+  echo "    Đã tạo role ${DB_USER} (cluster ${PG_CLUSTER:-mặc định}, port ${PG_PORT})."
 fi
-sudo -u postgres psql -tc "SELECT 1 FROM pg_database WHERE datname='${DB_NAME}'" | grep -q 1 \
-  || sudo -u postgres createdb -O "$DB_USER" "$DB_NAME"
-sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE ${DB_NAME} TO ${DB_USER};" >/dev/null
+"${PSQL_ADMIN[@]}" -tc "SELECT 1 FROM pg_database WHERE datname='${DB_NAME}'" | grep -q 1 \
+  || "${CREATEDB_ADMIN[@]}" -O "$DB_USER" "$DB_NAME"
+"${PSQL_ADMIN[@]}" -c "GRANT ALL PRIVILEGES ON DATABASE ${DB_NAME} TO ${DB_USER};" >/dev/null
 # PostgreSQL 15+ cần cả schema grant
-sudo -u postgres psql -d "$DB_NAME" -c "GRANT ALL ON SCHEMA public TO ${DB_USER};" >/dev/null || true
+"${PSQL_ADMIN[@]}" -d "$DB_NAME" -c "GRANT ALL ON SCHEMA public TO ${DB_USER};" >/dev/null || true
 
 echo "==> [4/7] Python venv + dependencies..."
 python3 -m venv "$APP_DIR/.venv"
@@ -81,14 +124,14 @@ python3 -m venv "$APP_DIR/.venv"
 "$APP_DIR/.venv/bin/pip" install -q -r "$APP_DIR/requirements.txt"
 
 echo "==> [5/7] Viết file .env..."
-DB_PASS_ENC="$(db_pass_enc "$DB_PASS")"
-# LUÔN ensure DATABASE_URL khớp DB_PASS hiện tại (giữ SECRET_KEY cũ nếu đã có)
+DB_PASS_ENC="$(python3 -c 'import sys,urllib.parse as u; print(u.quote_plus(sys.argv[1]))' "$DB_PASS")"
+# LUÔN ensure DATABASE_URL khớp DB_PASS + ĐÚNG PORT của cluster (giữ SECRET_KEY cũ)
 if [[ ! -f "$APP_DIR/.env" ]]; then
   SECRET=$(python3 -c "import secrets; print(secrets.token_urlsafe(48))")
   cat > "$APP_DIR/.env" <<EOF
 APP_NAME=Bao cao cong tac khoa
 SECRET_KEY=${SECRET}
-DATABASE_URL=postgresql+psycopg2://${DB_USER}:${DB_PASS_ENC}@127.0.0.1:5432/${DB_NAME}
+DATABASE_URL=postgresql+psycopg2://${DB_USER}:${DB_PASS_ENC}@127.0.0.1:${PG_PORT}/${DB_NAME}
 SESSION_HOURS=12
 HOST=127.0.0.1
 PORT=${APP_PORT}
@@ -96,15 +139,15 @@ SEED_ADMIN_USER=${ADMIN_USER}
 SEED_ADMIN_PASS=${ADMIN_PASS}
 EOF
 else
-  # cập nhật lại dòng DATABASE_URL cho khớp DB_PASS mới (đã percent-encode → sed-safe)
-  NEW_URL="postgresql+psycopg2://${DB_USER}:${DB_PASS_ENC}@127.0.0.1:5432/${DB_NAME}"
+  # cập nhật lại dòng DATABASE_URL cho khớp DB_PASS/port mới (đã percent-encode → sed-safe)
+  NEW_URL="postgresql+psycopg2://${DB_USER}:${DB_PASS_ENC}@127.0.0.1:${PG_PORT}/${DB_NAME}"
   if grep -q '^DATABASE_URL=' "$APP_DIR/.env"; then
     sed -i "s|^DATABASE_URL=.*|DATABASE_URL=${NEW_URL}|" "$APP_DIR/.env"
   else
     echo "DATABASE_URL=${NEW_URL}" >> "$APP_DIR/.env"
   fi
   grep -q '^PORT=' "$APP_DIR/.env" || echo "PORT=${APP_PORT}" >> "$APP_DIR/.env"
-  echo "    Đã đồng bộ DATABASE_URL trong .env với DB_PASS."
+  echo "    Đã đồng bộ DATABASE_URL trong .env (port ${PG_PORT})."
 fi
 chmod 600 "$APP_DIR/.env"
 
@@ -165,54 +208,63 @@ PY
 }
 
 heal_db() {
-  echo "    --- Chẩn đoán PostgreSQL ---"
-  pg_isready -h 127.0.0.1 -p 5432 || true
+  echo "    --- Chẩn đoán PostgreSQL (cluster ${PG_CLUSTER:-mặc định}, port ${PG_PORT}) ---"
+  pg_isready -h 127.0.0.1 -p "$PG_PORT" || true
   pg_lsclusters 2>/dev/null || true
 
-  # (a) Postgres chạy chưa / có lắng nghe 5432 không?
-  service postgresql start >/dev/null 2>&1 || systemctl start postgresql || true
+  # (a) Cluster chạy chưa / có lắng nghe port thật không?
+  if [[ -n "$PG_CLUSTER" ]]; then
+    pg_ctlcluster "$PG_CLUSTER" start 2>/dev/null || true
+  else
+    service postgresql start >/dev/null 2>&1 || systemctl start postgresql || true
+  fi
   sleep 1
-  if ! pg_isready -h 127.0.0.1 -p 5432 >/dev/null 2>&1; then
-    echo "    ✗ Postgres KHÔNG lắng nghe 127.0.0.1:5432"
-    echo "      → Xem 'pg_lsclusters' ở trên: nếu cổng khác 5432 thì sửa DATABASE_URL trong .env"
+  if ! pg_isready -h 127.0.0.1 -p "$PG_PORT" >/dev/null 2>&1; then
+    echo "    ✗ Postgres KHÔNG lắng nghe 127.0.0.1:${PG_PORT}"
+    echo "      → Xem pg_lsclusters ở trên để biết port thật; chạy lại với DB_PORT=<port thật>."
     return 1
   fi
 
   # (b) Xác thực bằng chính DB_PASS qua TCP (cùng đường đi với ứng dụng)
-  if PGPASSWORD="$DB_PASS" psql -h 127.0.0.1 -p 5432 -U "$DB_USER" -d "$DB_NAME" \
+  if PGPASSWORD="$DB_PASS" psql -h 127.0.0.1 -p "$PG_PORT" -U "$DB_USER" -d "$DB_NAME" \
        -c "SELECT 1;" >/dev/null 2>&1; then
     echo "    ✓ psql xác thực OK với DB_PASS"
     return 0
   fi
   echo "    ✗ Xác thực psql thất bại — tiến hành tự sửa..."
 
-  # (c) Đặt lại mật khẩu (cùng session đặt password_encryption=scram-sha-256)
+  # (c) Đặt lại mật khẩu trên ĐÚNG cluster (scram-sha-256)
   pg_set_pass "$DB_PASS" >/dev/null
 
-  # (d) DB + quyền
-  sudo -u postgres psql -tc "SELECT 1 FROM pg_database WHERE datname='${DB_NAME}'" | grep -q 1 \
-    || sudo -u postgres createdb -O "$DB_USER" "$DB_NAME"
-  sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE ${DB_NAME} TO ${DB_USER};" >/dev/null
-  sudo -u postgres psql -d "$DB_NAME" -c "GRANT ALL ON SCHEMA public TO ${DB_USER};" >/dev/null || true
+  # (d) DB + quyền trên ĐÚNG cluster
+  "${PSQL_ADMIN[@]}" -tc "SELECT 1 FROM pg_database WHERE datname='${DB_NAME}'" | grep -q 1 \
+    || "${CREATEDB_ADMIN[@]}" -O "$DB_USER" "$DB_NAME"
+  "${PSQL_ADMIN[@]}" -c "GRANT ALL PRIVILEGES ON DATABASE ${DB_NAME} TO ${DB_USER};" >/dev/null
+  "${PSQL_ADMIN[@]}" -d "$DB_NAME" -c "GRANT ALL ON SCHEMA public TO ${DB_USER};" >/dev/null || true
 
   # (e) pg_hba: nếu dòng host dùng md5 nhưng mật khẩu lưu dạng scram → sửa + reload
   local HBA
-  HBA="$(sudo -u postgres psql -tAc 'SHOW hba_file;' 2>/dev/null || true)"
+  HBA="$("${PSQL_ADMIN[@]}" -tAc 'SHOW hba_file;' 2>/dev/null || true)"
   if [[ -n "$HBA" && -f "$HBA" ]] && grep -Eq '^[^#]*\bmd5\b' "$HBA"; then
     echo "    • pg_hba.conf dùng md5 — đổi các dòng host sang scram-sha-256 + reload"
     cp "$HBA" "${HBA}.bak-baocao"
     sed -i '/^\s*#/!s/\bmd5\b/scram-sha-256/g' "$HBA"
-    systemctl reload postgresql 2>/dev/null || service postgresql reload 2>/dev/null || true
+    if [[ -n "$PG_CLUSTER" ]]; then
+      pg_ctlcluster "$PG_CLUSTER" reload 2>/dev/null || true
+    else
+      systemctl reload postgresql 2>/dev/null || service postgresql reload 2>/dev/null || true
+    fi
   fi
 
   # (f) Thử lại
-  if PGPASSWORD="$DB_PASS" psql -h 127.0.0.1 -p 5432 -U "$DB_USER" -d "$DB_NAME" \
+  if PGPASSWORD="$DB_PASS" psql -h 127.0.0.1 -p "$PG_PORT" -U "$DB_USER" -d "$DB_NAME" \
        -c "SELECT 1;" >/dev/null 2>&1; then
     echo "    ✓ Đã tự sửa — xác thực OK"
     return 0
   fi
   echo "    ✗ Vẫn thất bại. Lỗi psql thật:"
-  PGPASSWORD="$DB_PASS" psql -h 127.0.0.1 -p 5432 -U "$DB_USER" -d "$DB_NAME" -c "SELECT 1;" || true
+  PGPASSWORD="$DB_PASS" psql -h 127.0.0.1 -p "$PG_PORT" -U "$DB_USER" -d "$DB_NAME" -c "SELECT 1;" || true
+  echo "    💡 Gợi ý: trên máy này có nhiều PostgreSQL. Kiểm tra: pg_lsclusters, docker ps | grep postgres"
   return 1
 }
 
