@@ -1,0 +1,123 @@
+{% extends "base.html" %}
+{% set active_nav = 'tong-hop' %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1>Tổng hợp toàn viện <span class="tag admin-tag">ADMIN</span></h1>
+    <p class="muted">Bảng so sánh các khoa cho ban giám đốc · kỳ <strong>{{ label }}</strong></p>
+  </div>
+  <div class="hero-actions no-print">
+    <a class="btn primary" href="/tong-hop/xuat-pdf?{{ qs_base }}">⬇ Xuất PDF</a>
+    <button class="btn" type="button" onclick="window.print()">🖨 In</button>
+  </div>
+</div>
+
+<form class="toolbar no-print" method="get" action="/tong-hop">
+  <label>Kỳ báo cáo
+    <select name="mode" onchange="onSumMode(this.form)">
+      <option value="day" {{ 'selected' if mode=='day' }}>Theo ngày</option>
+      <option value="yesterday" {{ 'selected' if mode=='yesterday' }}>Hôm qua</option>
+      <option value="week" {{ 'selected' if mode=='week' }}>Tuần</option>
+      <option value="month" {{ 'selected' if mode=='month' }}>Tháng</option>
+      <option value="range" {{ 'selected' if mode=='range' }}>Từ ngày → đến ngày</option>
+    </select>
+  </label>
+  <label id="refWrap" {{ 'hidden' if mode == 'range' }}>Ngày tham chiếu
+    <input type="date" name="ref" value="{{ ref.isoformat() }}">
+  </label>
+  <label id="tuWrap" {{ 'hidden' if mode != 'range' }}>Từ
+    <input type="date" name="tu" value="{{ tu or ref.isoformat() }}">
+  </label>
+  <label id="denWrap" {{ 'hidden' if mode != 'range' }}>Đến
+    <input type="date" name="den" value="{{ den or ref.isoformat() }}">
+  </label>
+  <button class="btn" type="submit">Xem</button>
+</form>
+
+<div class="quick-row no-print">
+  <a class="chip" href="/tong-hop?mode=day">Hôm nay</a>
+  <a class="chip" href="/tong-hop?mode=week">Tuần này</a>
+  <a class="chip" href="/tong-hop?mode=month">Tháng này</a>
+</div>
+
+<article class="report-sheet">
+  <header class="report-head">
+    <div class="rh-left">
+      <div class="rh-hospital">{{ hospital }}</div>
+    </div>
+    <div class="rh-center">
+      <h2>BÁO CÁO TỔNG HỢP TOÀN VIỆN</h2>
+      <div class="rh-period"><strong>{{ label }}</strong></div>
+      <div class="rh-dept">Từ {{ dfrom|vnd }} đến {{ dto|vnd }} · {{ rows|length }} khoa</div>
+    </div>
+    <div class="rh-right"></div>
+  </header>
+
+  <table class="data-table report-table summary-table">
+    <thead>
+      <tr>
+        <th class="center">STT</th>
+        <th class="center">Mã</th>
+        <th class="center">Khoa</th>
+        <th class="num">Khám bệnh</th>
+        <th class="num">Vào viện</th>
+        <th class="num">Ra viện</th>
+        <th class="num">Tử vong</th>
+        <th class="num">Hiện còn</th>
+        <th class="num">Tổng chỉ tiêu</th>
+        <th class="no-print">Chi tiết</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in rows %}
+      <tr>
+        <td class="center">{{ loop.index }}</td>
+        <td class="center"><span class="tag">{{ r.code }}</span></td>
+        <td><strong>{{ r.name }}</strong></td>
+        <td class="num">{{ r.kham|int }}</td>
+        <td class="num">{{ r.vao|int }}</td>
+        <td class="num">{{ r.ra|int }}</td>
+        <td class="num">{{ r.tu_vong|int }}</td>
+        <td class="num">{{ r.hien_con|int }}</td>
+        <td class="num"><strong>{{ r.tong_chi_tieu|int }}</strong></td>
+        <td class="no-print"><a class="btn small ghost" href="/bao-cao?khoa={{ r.id }}&mode={{ mode }}{% if ref %}&ref={{ ref.isoformat() }}{% endif %}{% if tu %}&tu={{ tu }}{% endif %}{% if den %}&den={{ den }}{% endif %}">Mở</a></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+    <tfoot>
+      <tr class="total-row">
+        <td></td>
+        <td></td>
+        <td><strong>TỔNG CỘNG</strong></td>
+        <td class="num">{{ totals.kham|int }}</td>
+        <td class="num">{{ totals.vao|int }}</td>
+        <td class="num">{{ totals.ra|int }}</td>
+        <td class="num">{{ totals.tu_vong|int }}</td>
+        <td class="num">{{ totals.hien_con|int }}</td>
+        <td class="num">{{ totals.tong_chi_tieu|int }}</td>
+        <td class="no-print"></td>
+      </tr>
+    </tfoot>
+  </table>
+
+  <footer class="report-foot">
+    <div class="foot-date">{{ today|vnfull }}</div>
+  </footer>
+</article>
+
+<div class="notice info no-print" style="margin-top:1rem">
+  💡 Chỉ tiêu tổng hợp: <em>Khám bệnh</em> = cộng dòng có “khám”; <em>Vào/Ra viện</em> theo nhãn dòng;
+  <em>Hiện còn</em> lấy giá trị cuối kỳ; <em>Tổng chỉ tiêu</em> = cộng các dòng sum (không tính snapshot).
+  Số liệu tổng hợp từ mẫu động từng khoa — khoa chưa nhập thì ô trống/0.
+</div>
+
+<script>
+function onSumMode(form) {
+  const m = form.mode.value;
+  const isRange = m === 'range';
+  form.tu && (form.tu.closest('label').hidden = !isRange);
+  form.den && (form.den.closest('label').hidden = !isRange);
+  form.ref && (form.ref.closest('label').hidden = isRange);
+}
+</script>
+{% endblock %}

@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="card error-page">
+  <div style="font-size:2.5rem">🔒</div>
+  <h1>403 — Không có quyền</h1>
+  <p class="muted">{{ detail or 'Bạn không có quyền truy cập chức năng này.' }}</p>
+  <p class="muted">Tài khoản khoa chỉ được thao tác trong khoa của mình. Cấu hình mẫu &amp; người dùng dành cho <strong>admin</strong>.</p>
+  <p><a class="btn primary" href="/">← Về trang chủ</a></p>
+</div>
+{% endblock %}

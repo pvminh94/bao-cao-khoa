@@ -1,0 +1,22 @@
+[Unit]
+Description=He thong bao cao cong tac khoa (FastAPI)
+After=network.target postgresql.service
+Wants=postgresql.service
+
+[Service]
+Type=simple
+User=baocao
+Group=baocao
+WorkingDirectory=/opt/bao-cao-khoa
+EnvironmentFile=/opt/bao-cao-khoa/.env
+ExecStart=/opt/bao-cao-khoa/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000
+Restart=always
+RestartSec=3
+# bảo mật tối thiểu
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ReadWritePaths=/opt/bao-cao-khoa
+
+[Install]
+WantedBy=multi-user.target

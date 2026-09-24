@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% set active_nav = 'home' %}
+{% block content %}
+{% if user.role == 'admin' %}
+<div class="notice info">Bạn đang đăng nhập <strong>ADMIN</strong> — thấy toàn bộ khoa, cấu hình mẫu và quản lý người dùng.</div>
+{% elif user.dept %}
+<div class="notice info">Đăng nhập <strong>{{ user.dept.name }}</strong> — bạn chỉ thao tác trong khoa của mình.</div>
+{% else %}
+<div class="notice warn">Tài khoản chưa gắn khoa — liên hệ admin.</div>
+{% endif %}
+
+<div class="hero">
+  <div>
+    <h1>Tổng quan</h1>
+    <p class="muted">Nhập mỗi ngày → xuất báo cáo ngày/tuần/tháng theo mẫu từng khoa.</p>
+  </div>
+  <div class="hero-actions">
+    <a class="btn primary" href="/nhap">📝 Nhập hôm nay</a>
+    <a class="btn" href="/bao-cao?mode=day">📊 Báo cáo hôm nay</a>
+    <a class="btn" href="/bao-cao?mode=month">🗓️ Báo cáo tháng</a>
+  </div>
+</div>
+
+<div class="grid cards">
+  <div class="card">
+    <div class="card-title">Khoa của bạn {{ '(toàn viện)' if user.role=='admin' else '' }}</div>
+    <div class="big">{{ pairs|length }}</div>
+    <ul class="list">
+      {% for dept, tmpl in pairs %}
+      <li><span>{{ dept.name }}</span><span class="tag">{{ dept.code }}</span></li>
+      {% endfor %}
+    </ul>
+  </div>
+  <div class="card">
+    <div class="card-title">Tổng bản ghi trong hệ thống</div>
+    <div class="big">{{ "{:,}".format(total_entries).replace(",", ".") }}</div>
+    <p class="muted">Lưu trong CSDL — không cộng tay trên Excel.</p>
+  </div>
+  <div class="card">
+    <div class="card-title">Nhập 7 ngày gần nhất</div>
+    <div class="bars">
+      {% for r in recent %}
+      <div class="bar-row">
+        <span class="bar-label">{{ r.date|vnd }}</span>
+        <div class="bar-track"><div class="bar-fill" style="width: {{ r.pct }}%"></div></div>
+        <span class="bar-val">{{ r.count }}</span>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+</div>
+
+<div class="card" style="margin-top:1.2rem">
+  <div class="card-title">Vào nhanh</div>
+  <div class="quick-links">
+    {% for dept, tmpl in pairs %}
+    <a class="chip" href="/nhap?khoa={{ dept.id }}">Nhập — {{ dept.name }}</a>
+    <a class="chip ghost" href="/bao-cao?khoa={{ dept.id }}&mode=day">BC — {{ dept.name }}</a>
+    {% endfor %}
+  </div>
+</div>
+{% endblock %}

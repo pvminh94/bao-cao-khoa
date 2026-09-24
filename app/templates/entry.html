@@ -1,0 +1,132 @@
+{% extends "base.html" %}
+{% set active_nav = 'nhap' %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1>Nhập liệu theo ngày</h1>
+    <p class="muted">Cột <strong>Đối tượng</strong> lấy từ khai báo của mẫu — chỉ nhập ô đầu vào, cột Tổng tự tính.</p>
+  </div>
+</div>
+
+<form class="toolbar" id="filterForm" method="get" action="/nhap">
+  <label>Khoa
+    <select name="khoa" onchange="this.form.submit()">
+      {% for dept, tmpl in pairs %}
+      <option value="{{ dept.id }}" {{ 'selected' if dept.id == dept_id }}>{{ dept.name }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label>Ngày
+    <input type="date" name="ngay" value="{{ day.isoformat() }}" onchange="this.form.submit()">
+  </label>
+  <div class="btn-group">
+    <a class="btn small" href="/nhap?khoa={{ dept_id }}&ngay={{ prev_day.isoformat() }}">← Hôm qua</a>
+    <a class="btn small" href="/nhap?khoa={{ dept_id }}&ngay={{ next_day.isoformat() }}">Ngày mai →</a>
+    <a class="btn small ghost" href="/bao-cao?khoa={{ dept_id }}&mode=day&ref={{ day.isoformat() }}">Xem báo cáo</a>
+  </div>
+</form>
+
+{% if has_data %}
+<div class="notice info">Đã có dữ liệu ngày <strong>{{ day|vnd }}</strong>.</div>
+{% else %}
+<div class="notice warn">Chưa có dữ liệu ngày <strong>{{ day|vnd }}</strong>.
+  <form method="post" action="/nhap/nhan-ban" style="display:inline">
+    <input type="hidden" name="khoa" value="{{ dept_id }}">
+    <input type="hidden" name="ngay" value="{{ day.isoformat() }}">
+    <input type="hidden" name="tu_ngay" value="{{ prev_day.isoformat() }}">
+    <button class="btn small" type="submit">Nhân bản từ {{ prev_day|vnd }}</button>
+  </form>
+</div>
+{% endif %}
+
+<form id="entryForm">
+  <input type="hidden" name="khoa" value="{{ dept_id }}">
+  <input type="hidden" name="ngay" value="{{ day.isoformat() }}">
+  <input type="hidden" name="payload" id="payloadInput">
+  {% set cols = structure['columns'] | sort(attribute='sort_order') %}
+  {% set input_cols = cols | selectattr('kind', 'equalto', 'input') | list %}
+  {% set calc_cols = cols | selectattr('kind', 'equalto', 'calc') | list %}
+
+  <div class="table-wrap card">
+    <table class="data-table entry-table">
+      <thead>
+        <tr>
+          <th class="sticky-l1">STT</th>
+          <th class="sticky-l2">Danh mục</th>
+          <th colspan="{{ input_cols|length + calc_cols|length }}" class="center">Đối tượng số liệu (khai báo trong Cấu hình)</th>
+        </tr>
+        <tr>
+          <th class="sticky-l1"></th>
+          <th class="sticky-l2"></th>
+          {% for c in input_cols %}
+          <th class="num">{{ c.label }}{% if c.group_label %}<small class="grp">{{ c.group_label }}</small>{% endif %}</th>
+          {% endfor %}
+          {% for c in calc_cols %}
+          <th class="num calc">{{ c.label }}{% if c.group_label %}<small class="grp">{{ c.group_label }}</small>{% endif %}</th>
+          {% endfor %}
+        </tr>
+      </thead>
+      <tbody>
+      {% set stt = namespace(v=0) %}
+      {% for sec in structure['sections'] %}
+        <tr class="section-row"><td colspan="{{ 2 + cols|length }}">{{ sec.title }}</td></tr>
+        {% for b in sec['blocks'] %}
+        <tr class="block-row"><td colspan="{{ 2 + cols|length }}">▸ {{ b.label }}</td></tr>
+          {% for r in b['rows'] %}
+          {% set stt.v = stt.v + 1 %}
+          <tr data-row="{{ r.id }}">
+            <td class="center">{{ stt.v }}</td>
+            <td>{{ r.group_label }}{% if r.group_label %} — {% endif %}{{ r.row_label }}</td>
+            {% for c in input_cols %}
+            <td class="num">
+              <input class="cell-input" type="number" min="0" step="1"
+                     data-row="{{ r.id }}" data-col="{{ c.col_key }}"
+                     value="{{ vals.get((r.id, c.col_key), 0) }}">
+            </td>
+            {% endfor %}
+            {% for c in calc_cols %}
+            <td class="num calc-cell" data-row="{{ r.id }}" data-formula="{{ c.formula }}">0</td>
+            {% endfor %}
+          </tr>
+          {% endfor %}
+        {% endfor %}
+        {% for r in sec['loose_rows'] %}
+        {% set stt.v = stt.v + 1 %}
+        <tr data-row="{{ r.id }}">
+          <td class="center">{{ stt.v }}</td>
+          <td>{{ r.group_label }}{% if r.group_label %} — {% endif %}{{ r.row_label }}</td>
+          {% for c in input_cols %}
+          <td class="num">
+            <input class="cell-input" type="number" min="0" step="1"
+                   data-row="{{ r.id }}" data-col="{{ c.col_key }}"
+                   value="{{ vals.get((r.id, c.col_key), 0) }}">
+          </td>
+          {% endfor %}
+          {% for c in calc_cols %}
+          <td class="num calc-cell" data-row="{{ r.id }}" data-formula="{{ c.formula }}">0</td>
+          {% endfor %}
+        </tr>
+        {% endfor %}
+      {% endfor %}
+      </tbody>
+      <tfoot>
+        <tr class="total-row">
+          <td></td>
+          <td><strong>Tổng cộng ngày</strong></td>
+          {% for c in input_cols %}<td class="num" data-sum-col="{{ c.col_key }}">0</td>{% endfor %}
+          {% for c in calc_cols %}<td class="num" data-sum-col="{{ c.col_key }}">0</td>{% endfor %}
+        </tr>
+      </tfoot>
+    </table>
+  </div>
+
+  <div class="save-bar">
+    <span id="saveStatus" class="muted"></span>
+    <button type="submit" class="btn primary big" id="btnSave">💾 Lưu ngày {{ day|vnd }}</button>
+  </div>
+</form>
+{% endblock %}
+
+{% block scripts %}
+<script>initEntryGrid();</script>
+{% endblock %}

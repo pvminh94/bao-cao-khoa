@@ -1,0 +1,136 @@
+{% extends "base.html" %}
+{% set active_nav = 'bao-cao' %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1>Xuất báo cáo</h1>
+    <p class="muted">Ngày / Tuần / Tháng / Từ ngày→đến ngày · mẫu theo khoa</p>
+  </div>
+  <div class="hero-actions no-print">
+    <a class="btn primary" href="/xuat-excel?{{ qs_base }}">⬇ Excel</a>
+    <a class="btn primary" href="/xuat-pdf?{{ qs_base }}">⬇ PDF</a>
+    <button class="btn" type="button" onclick="window.print()">🖨 In</button>
+  </div>
+</div>
+
+<form class="toolbar no-print" id="repForm" method="get" action="/bao-cao">
+  <label>Khoa
+    <select name="khoa" onchange="this.form.submit()">
+      {% for dept, tmpl in pairs %}
+      <option value="{{ dept.id }}" {{ 'selected' if dept.id == dept_id }}>{{ dept.name }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label>Kỳ báo cáo
+    <select name="mode" id="modeSel" onchange="onModeChange()">
+      <option value="day" {{ 'selected' if mode=='day' }}>Theo ngày</option>
+      <option value="yesterday" {{ 'selected' if mode=='yesterday' }}>Hôm qua</option>
+      <option value="week" {{ 'selected' if mode=='week' }}>Tuần (T2–CN)</option>
+      <option value="month" {{ 'selected' if mode=='month' }}>Tháng</option>
+      <option value="range" {{ 'selected' if mode=='range' }}>Từ ngày → đến ngày</option>
+    </select>
+  </label>
+  <label id="refWrap" {{ 'hidden' if mode == 'range' }}>Ngày tham chiếu
+    <input type="date" name="ref" value="{{ ref.isoformat() }}" onchange="this.form.submit()">
+  </label>
+  <label id="tuWrap" {{ 'hidden' if mode != 'range' }}>Từ
+    <input type="date" name="tu" value="{{ tu or ref.isoformat() }}">
+  </label>
+  <label id="denWrap" {{ 'hidden' if mode != 'range' }}>Đến
+    <input type="date" name="den" value="{{ den or ref.isoformat() }}">
+  </label>
+  <button class="btn" type="submit" id="btnApply" {{ 'hidden' if mode != 'range' }}>Xem</button>
+</form>
+
+<div class="quick-row no-print">
+  <a class="chip" href="/bao-cao?khoa={{ dept_id }}&mode=day">Hôm nay</a>
+  <a class="chip" href="/bao-cao?khoa={{ dept_id }}&mode=week">Tuần này</a>
+  <a class="chip" href="/bao-cao?khoa={{ dept_id }}&mode=month">Tháng này</a>
+  <a class="chip ghost" href="/nhap?khoa={{ dept_id }}">Mở form nhập</a>
+</div>
+
+{% if not report or not report.template %}
+  <div class="notice warn">Khoa này chưa có mẫu báo cáo.</div>
+{% else %}
+<article class="report-sheet" id="reportSheet">
+  <header class="report-head">
+    <div class="rh-left">
+      <div class="rh-hospital">{{ report.dept.hospital }}</div>
+      <div class="rh-num">Số ....../2026</div>
+      <div class="rh-code">{{ report.dept.report_code }}</div>
+    </div>
+    <div class="rh-center">
+      <h2>{{ report.template.title }}</h2>
+      <div class="rh-period"><strong>{{ label }}</strong></div>
+      <div class="rh-dept">Khoa: {{ report.dept.name }}</div>
+    </div>
+    <div class="rh-right"></div>
+  </header>
+
+  <table class="data-table report-table">
+    <thead>
+      <tr>
+        <th rowspan="2" class="center">STT</th>
+        <th rowspan="2" class="center">Danh mục</th>
+        {% for g in col_header_rows.row1 %}
+          {% if g.group %}
+            <th colspan="{{ g.span }}" class="center">{{ g.label }}</th>
+          {% else %}
+            <th rowspan="2" class="num">{{ g.label }}</th>
+          {% endif %}
+        {% endfor %}
+      </tr>
+      <tr>
+        {% for c in cols %}
+          {% if c.group_label %}
+            <th class="num">{{ c.label }}</th>
+          {% endif %}
+        {% endfor %}
+      </tr>
+    </thead>
+    <tbody>
+      {% for item in rows_view %}
+        {% if item.type == 'section' %}
+        <tr class="section-row"><td colspan="{{ 2 + cols|length }}"><strong>{{ item.title }}</strong></td></tr>
+        {% elif item.type == 'block' %}
+        <tr class="block-row"><td colspan="{{ 2 + cols|length }}">▸ {{ item.label }}</td></tr>
+        {% else %}
+        <tr>
+          <td class="center">{{ item.stt }}</td>
+          <td>{% if item.group %}{{ item.group }} — {% endif %}{{ item.label }}
+            {% if item.agg and item.agg != 'sum' %}<small class="tag">{{ 'đầu kỳ' if item.agg=='first' else 'cuối kỳ' }}</small>{% endif %}
+          </td>
+          {% for c in cols %}
+          <td class="num">{{ item.cells.get(c.col_key, 0) | int }}</td>
+          {% endfor %}
+        </tr>
+        {% endif %}
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <footer class="report-foot">
+    <div class="foot-date">{{ today|vnfull }}</div>
+  </footer>
+</article>
+
+<div class="notice info no-print" style="margin-top:1rem">
+  💡 Kỳ <strong>{{ label }}</strong> ({{ dfrom|vnd }} → {{ dto|vnd }}).
+  Dòng <em>đầu kỳ/cuối kỳ</em> lấy ngày đầu/cuối; còn lại cộng dồn.
+</div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+function onModeChange() {
+  const m = document.getElementById('modeSel').value;
+  const isRange = m === 'range';
+  document.getElementById('tuWrap').hidden = !isRange;
+  document.getElementById('denWrap').hidden = !isRange;
+  document.getElementById('btnApply').hidden = !isRange;
+  document.getElementById('refWrap').hidden = isRange;
+  if (!isRange) document.getElementById('repForm').submit();
+}
+</script>
+{% endblock %}

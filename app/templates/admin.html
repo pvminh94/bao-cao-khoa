@@ -1,0 +1,205 @@
+{% extends "base.html" %}
+{% set active_nav = 'cau-hinh' %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1>Cấu hình mẫu báo cáo <span class="tag admin-tag">ADMIN</span></h1>
+    <p class="muted">Mỗi khoa một mẫu · <strong>khai báo đối tượng (cột)</strong> linh hoạt · user thường không vào được trang này.</p>
+  </div>
+  <div class="hero-actions">
+    <a class="btn {{ 'primary' if tab!='nguoi-dung' else '' }}" href="/cau-hinh?tab=mau">Mẫu báo cáo</a>
+    <a class="btn {{ 'primary' if tab=='doi-tuong' else '' }}" href="/cau-hinh?tab=doi-tuong">Đối tượng (cột)</a>
+    <a class="btn {{ 'primary' if tab=='nguoi-dung' else '' }}" href="/cau-hinh/nguoi-dung">Người dùng</a>
+    <a class="btn" href="/cau-hinh/lich-su">Lịch sử sửa</a>
+    <button class="btn" onclick="document.getElementById('addDeptBox').hidden = !document.getElementById('addDeptBox').hidden">+ Thêm khoa</button>
+  </div>
+</div>
+
+<div class="card" id="addDeptBox" hidden>
+  <div class="card-title">Thêm khoa mới (tự tạo mẫu + đối tượng BHYT mặc định)</div>
+  <form method="post" action="/cau-hinh/khoa" class="inline-form">
+    <label>Mã <input name="ma" required placeholder="TMH"></label>
+    <label>Tên khoa <input name="ten" required placeholder="Khoa Tai mũi họng"></label>
+    <button class="btn primary" type="submit">Tạo khoa</button>
+  </form>
+</div>
+
+{# ===================== TAB MẪU ===================== #}
+{% if tab != 'doi-tuong' and tab != 'nguoi-dung' %}
+{% for item in data %}
+<div class="card tmpl-card" style="margin-top:1rem">
+  <div class="tmpl-head">
+    <div>
+      <span class="tag">{{ item.dept.code }}</span>
+      <strong>{{ item.dept.name }}</strong>
+      <span class="muted">— {{ item.tmpl.name if item.tmpl }}</span>
+    </div>
+    <div class="tmpl-actions">
+      <a class="btn small ghost" href="/bao-cao?khoa={{ item.dept.id }}&mode=day">Xem BC</a>
+      <a class="btn small ghost" href="/nhap?khoa={{ item.dept.id }}">Nhập</a>
+      <form method="post" action="/cau-hinh/khoa/{{ item.dept.id }}/xoa" onsubmit="return confirm('Ẩn khoa?')">
+        <button class="btn small danger" type="submit">Ẩn</button>
+      </form>
+    </div>
+  </div>
+
+  <details class="dept-meta">
+    <summary>Tên BV / ký hiệu / tên khoa</summary>
+    <form method="post" action="/cau-hinh/khoa/{{ item.dept.id }}/ten" class="inline-form" style="margin-top:.6rem">
+      <label>Tên bệnh viện <input name="hospital" value="{{ item.dept.hospital }}"></label>
+      <label>Ký hiệu <input name="report_code" value="{{ item.dept.report_code }}" style="width:80px"></label>
+      <label>Tên khoa <input name="name" value="{{ item.dept.name }}"></label>
+      <button class="btn small" type="submit">Lưu</button>
+    </form>
+  </details>
+
+  {% if item.tmpl %}
+  {% for sec in item.structure.sections %}
+  <div class="section-box">
+    <form method="post" action="/cau-hinh/muc/{{ sec.id }}/sua" class="sec-title-form">
+      <input name="title" value="{{ sec.title }}" class="sec-title-input">
+      <button class="btn small" type="submit">Đổi tên</button>
+    </form>
+    <form method="post" action="/cau-hinh/muc/{{ sec.id }}/xoa" onsubmit="return confirm('Xóa mục?')">
+      <button class="btn small danger" type="submit">Xóa mục</button>
+    </form>
+
+    <table class="mini-table">
+      <thead><tr><th>Nhóm</th><th>Tên dòng</th><th>Cách tính kỳ</th><th></th></tr></thead>
+      <tbody>
+      {% for b in sec.blocks %}
+      <tr class="block-row-table"><td colspan="4">▸ {{ b.label }}</td></tr>
+      {% for r in b.rows %}
+      <tr>
+        <td colspan="4" style="padding-left:1.2rem">
+          <form method="post" action="/cau-hinh/dong/{{ r.id }}/sua" class="inline-form row-edit">
+            <input name="group_label" value="{{ r.group_label }}" placeholder="nhóm" style="width:120px">
+            <input name="row_label" value="{{ r.row_label }}" required>
+            <select name="agg">
+              <option value="sum" {{ 'selected' if r.agg=='sum' }}>Cộng dồn</option>
+              <option value="first" {{ 'selected' if r.agg=='first' }}>Đầu kỳ</option>
+              <option value="last" {{ 'selected' if r.agg=='last' }}>Cuối kỳ</option>
+            </select>
+            <button class="btn small" type="submit">Lưu</button>
+          </form>
+          <form method="post" action="/cau-hinh/dong/{{ r.id }}/xoa" style="display:inline" onsubmit="return confirm('Xóa dòng?')">
+            <button class="btn small danger" type="submit">✕</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+      {% endfor %}
+      {% for r in sec.loose_rows %}
+      <tr>
+        <td colspan="4">
+          <form method="post" action="/cau-hinh/dong/{{ r.id }}/sua" class="inline-form row-edit">
+            <input name="group_label" value="{{ r.group_label }}" placeholder="nhóm (tuỳ chọn)" style="width:140px">
+            <input name="row_label" value="{{ r.row_label }}" required>
+            <select name="agg">
+              <option value="sum" {{ 'selected' if r.agg=='sum' }}>Cộng dồn</option>
+              <option value="first" {{ 'selected' if r.agg=='first' }}>Đầu kỳ</option>
+              <option value="last" {{ 'selected' if r.agg=='last' }}>Cuối kỳ</option>
+            </select>
+            <button class="btn small" type="submit">Lưu</button>
+            <button class="btn small ghost" formaction="/cau-hinh/dong/{{ r.id }}/len" title="Lên">↑</button>
+          </form>
+          <form method="post" action="/cau-hinh/dong/{{ r.id }}/xoa" style="display:inline" onsubmit="return confirm('Xóa dòng?')">
+            <button class="btn small danger" type="submit">✕</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+
+    <form method="post" action="/cau-hinh/dong" class="inline-form add-row-form">
+      <input type="hidden" name="section_id" value="{{ sec.id }}">
+      <input name="group_label" placeholder="Nhóm (vd: Nhi khoa)" style="width:150px">
+      <input name="row_label" placeholder="Tên dòng mới" required>
+      <select name="agg">
+        <option value="sum">Cộng dồn</option>
+        <option value="first">Đầu kỳ</option>
+        <option value="last">Cuối kỳ</option>
+      </select>
+      <button class="btn small primary" type="submit">+ Thêm dòng</button>
+    </form>
+  </div>
+  {% endfor %}
+
+  <form method="post" action="/cau-hinh/muc" class="inline-form" style="margin-top:.8rem">
+    <input type="hidden" name="tmpl_id" value="{{ item.tmpl.id }}">
+    <input name="title" placeholder="Tên mục mới (vd: 4. Tiêm ngừa)" required style="min-width:280px">
+    <button class="btn small primary" type="submit">+ Thêm mục</button>
+  </form>
+  {% endif %}
+</div>
+{% endfor %}
+{% endif %}
+
+{# ===================== TAB ĐỐI TƯỢNG ===================== #}
+{% if tab == 'doi-tuong' %}
+<div class="notice info">
+  Khai báo <strong>đối tượng/cột</strong> của từng mẫu: cột <em>input</em> để nhập tay,
+  cột <em>calc</em> tự tính theo công thức (vd <code>hs+tq+te+khac</code>).
+</div>
+
+{% for item in data %}
+<div class="card tmpl-card" style="margin-top:1rem">
+  <div class="tmpl-head">
+    <div>
+      <span class="tag">{{ item.dept.code }}</span>
+      <strong>{{ item.dept.name }}</strong>
+      <span class="muted">— {{ item.tmpl.name if item.tmpl }}</span>
+    </div>
+  </div>
+  {% if item.tmpl %}
+  <table class="mini-table">
+    <thead>
+      <tr>
+        <th>Thứ tự</th><th>Khóa</th><th>Tên hiển thị</th><th>Nhóm</th><th>Loại</th><th>Công thức</th><th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for c in item.structure.columns|sort(attribute='sort_order') %}
+      <tr>
+        <td>{{ c.sort_order }}</td>
+        <td><code>{{ c.col_key }}</code></td>
+        <td colspan="5">
+          <form method="post" action="/cau-hinh/doi-tuong/{{ c.id }}/sua" class="inline-form row-edit">
+            <input name="label" value="{{ c.label }}" required style="width:110px" {{ 'disabled' if c.kind=='calc' }}>
+            <input name="group_label" value="{{ c.group_label }}" placeholder="nhóm (BHYT)" style="width:100px" {{ 'disabled' if c.kind=='calc' }}>
+            <span class="tag">{{ 'Nhập' if c.kind=='input' else 'Tự tính' }}</span>
+            {% if c.kind == 'calc' %}
+            <input name="kind" value="calc" hidden>
+            <input name="formula" value="{{ c.formula }}" placeholder="hs+tq+te" style="width:180px">
+            {% else %}
+            <input name="kind" value="input" hidden>
+            <input name="formula" value="" hidden>
+            {% endif %}
+            <button class="btn small" type="submit">Lưu</button>
+          </form>
+          <form method="post" action="/cau-hinh/doi-tuong/{{ c.id }}/xoa" style="display:inline" onsubmit="return confirm('Xóa đối tượng này?')">
+            <button class="btn small danger" type="submit">✕</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <form method="post" action="/cau-hinh/doi-tuong" class="inline-form add-row-form">
+    <input type="hidden" name="tmpl_id" value="{{ item.tmpl.id }}">
+    <input name="label" placeholder="Tên đối tượng (vd: HS, TQ, Dịch vụ...)" required style="width:200px">
+    <input name="group_label" placeholder="Nhóm (vd: BHYT, để trống)" style="width:140px">
+    <select name="kind">
+      <option value="input">Ô nhập</option>
+      <option value="calc">Tự tính (công thức)</option>
+    </select>
+    <input name="formula" placeholder="Công thức: hs+tq+te+khac" style="width:200px">
+    <button class="btn small primary" type="submit">+ Thêm đối tượng</button>
+  </form>
+  {% endif %}
+</div>
+{% endfor %}
+{% endif %}
+{% endblock %}

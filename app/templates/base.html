@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Báo cáo công tác khoa{% endblock %}</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">
+    <span class="logo">🏥</span>
+    <div>
+      <strong>Báo cáo công tác khoa</strong>
+      <small>On-premise · PostgreSQL · phân quyền theo khoa</small>
+    </div>
+  </div>
+  <nav>
+    {% if user %}
+    <a href="/" class="{{ 'active' if active_nav=='home' }}">Tổng quan</a>
+    <a href="/nhap" class="{{ 'active' if active_nav=='nhap' }}">Nhập liệu</a>
+    <a href="/bao-cao" class="{{ 'active' if active_nav=='bao-cao' }}">Báo cáo</a>
+    {% if user.role == 'admin' %}
+    <a href="/tong-hop" class="{{ 'active' if active_nav=='tong-hop' }}">Tổng hợp</a>
+    <a href="/cau-hinh" class="{{ 'active' if active_nav=='cau-hinh' }}">Cấu hình</a>
+    <a href="/cau-hinh/nguoi-dung" class="{{ 'active' if active_nav=='users' }}">Người dùng</a>
+    {% endif %}
+    <span class="user-chip" title="{{ user.full_name or user.username }}">
+      {{ user.username }}
+      {% if user.role == 'admin' %}<em>admin</em>
+      {% elif user.dept %}<em>{{ user.dept.name }}</em>{% endif %}
+    </span>
+    <form method="post" action="/logout" class="logout-form">
+      <button class="btn small ghost light" type="submit">Đăng xuất</button>
+    </form>
+    {% else %}
+    <a href="/login">Đăng nhập</a>
+    {% endif %}
+  </nav>
+</header>
+<main class="container">
+{% block content %}{% endblock %}
+</main>
+<footer class="footer">
+  Dữ liệu tập trung trong PostgreSQL · Mẫu báo cáo cấu hình theo khoa · Chỉ admin chỉnh mẫu &amp; phân quyền.
+</footer>
+<script src="/static/app.js"></script>
+{% block scripts %}{% endblock %}
+</body>
+</html>

@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+{% set active_nav = 'users' %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1>Quản lý người dùng</h1>
+    <p class="muted">Chỉ <strong>admin</strong> vào được trang này. User chỉ được gán <strong>một khoa</strong>.</p>
+  </div>
+  <a class="btn ghost" href="/cau-hinh">← Về cấu hình mẫu</a>
+</div>
+
+<div class="card">
+  <div class="card-title">Thêm tài khoản</div>
+  <form method="post" action="/cau-hinh/nguoi-dung" class="inline-form" style="margin-top:.6rem">
+    <label>Username <input name="username" required placeholder="vd: kpk2"></label>
+    <label>Mật khẩu <input name="password" type="password" required minlength="6" placeholder="≥6 ký tự"></label>
+    <label>Họ tên <input name="full_name" placeholder="Nguyễn Văn A"></label>
+    <label>Vai trò
+      <select name="role" id="roleSel" onchange="document.getElementById('deptPick').disabled = this.value==='admin'">
+        <option value="user">User (theo khoa)</option>
+        <option value="admin">Admin</option>
+      </select>
+    </label>
+    <label>Khoa
+      <select name="dept_id" id="deptPick">
+        <option value="">— chọn khoa —</option>
+        {% for d in depts %}
+        <option value="{{ d.id }}">{{ d.name }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <button class="btn primary" type="submit">Tạo</button>
+  </form>
+</div>
+
+<div class="card" style="margin-top:1rem">
+  <div class="card-title">Danh sách ({{ users|length }})</div>
+  <table class="mini-table" style="margin-top:.6rem">
+    <thead>
+      <tr><th>Username</th><th>Họ tên</th><th>Vai trò</th><th>Khoa</th><th>TT</th><th>Thao tác</th></tr>
+    </thead>
+    <tbody>
+      {% for u in users %}
+      <tr>
+        <td><strong>{{ u.username }}</strong></td>
+        <td>{{ u.full_name }}</td>
+        <td><span class="tag {{ 'admin-tag' if u.role=='admin' }}">{{ u.role }}</span></td>
+        <td>
+          {% if u.role == 'admin' %}— toàn hệ thống —
+          {% else %}
+          <form method="post" action="/cau-hinh/nguoi-dung/{{ u.id }}/khoa" class="inline-form">
+            <select name="dept_id">
+              <option value="">— không gán —</option>
+              {% for d in depts %}
+              <option value="{{ d.id }}" {{ 'selected' if d.id == u.dept_id }}>{{ d.name }}</option>
+              {% endfor %}
+            </select>
+            <button class="btn small" type="submit">Gán</button>
+          </form>
+          {% endif %}
+        </td>
+        <td>{{ '✅' if u.active else '⛔' }}</td>
+        <td class="actions-cell">
+          <form method="post" action="/cau-hinh/nguoi-dung/{{ u.id }}/mat-khau" class="inline-form">
+            <input type="password" name="password" placeholder="Mật khẩu mới" minlength="6" required>
+            <button class="btn small" type="submit">Đổi MK</button>
+          </form>
+          {% if u.id != user.id %}
+          <form method="post" action="/cau-hinh/nguoi-dung/{{ u.id }}/toggle">
+            <button class="btn small {{ 'danger' if u.active else '' }}" type="submit">
+              {{ 'Vô hiệu hóa' if u.active else 'Kích hoạt' }}
+            </button>
+          </form>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

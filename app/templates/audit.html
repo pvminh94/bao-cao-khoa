@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% set active_nav = 'users' %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1>Lịch sử sửa số liệu <span class="tag admin-tag">ADMIN</span></h1>
+    <p class="muted">Audit log — ai sửa ô nào, từ giá trị gì → giá trị gì. Giới hạn {{ logs|length }} dòng gần nhất.</p>
+  </div>
+  <a class="btn ghost" href="/cau-hinh">← Về cấu hình</a>
+</div>
+
+<form class="toolbar" method="get" action="/cau-hinh/lich-su">
+  <label>Khoa
+    <select name="dept_id">
+      <option value="">Tất cả</option>
+      {% for d in depts %}
+      <option value="{{ d.id }}" {{ 'selected' if dept_id == d.id }}>{{ d.name }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label>Từ
+    <input type="date" name="tu" value="{{ tu or '' }}">
+  </label>
+  <label>Đến
+    <input type="date" name="den" value="{{ den or '' }}">
+  </label>
+  <button class="btn" type="submit">Lọc</button>
+</form>
+
+<div class="card">
+  <table class="mini-table">
+    <thead>
+      <tr>
+        <th>Thời gian</th>
+        <th>Người sửa</th>
+        <th>Khoa</th>
+        <th>Ngày số liệu</th>
+        <th>Dòng</th>
+        <th>Cột</th>
+        <th>Cũ</th>
+        <th>Mới</th>
+        <th>Thao tác</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for a in logs %}
+      <tr>
+        <td>{{ a.created_at.strftime('%d/%m/%Y %H:%M') if a.created_at else '' }}</td>
+        <td><strong>{{ a.username or (a.user_id and '#' ~ a.user_id) or '—' }}</strong></td>
+        <td>{{ a.dept.name if a.dept else '—' }}</td>
+        <td>{{ a.entry_date|vnd if a.entry_date else '—' }}</td>
+        <td>{{ a.row_label or '—' }}</td>
+        <td><code>{{ a.col_key }}</code></td>
+        <td class="num">{{ a.old_value|int if a.old_value is not none else '—' }}</td>
+        <td class="num"><strong>{{ a.new_value|int if a.new_value is not none else '—' }}</strong></td>
+        <td>
+          {% if a.action == 'create' %}<span class="tag">tạo mới</span>
+          {% elif a.action == 'copy' %}<span class="tag">nhân bản</span>
+          {% else %}<span class="tag">sửa</span>{% endif %}
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="9" class="muted center">Chưa có lịch sử thay đổi.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

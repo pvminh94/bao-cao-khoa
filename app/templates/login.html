@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}Đăng nhập — {{ app_name or 'Báo cáo khoa' }}{% endblock %}
+{% block content %}
+<div class="login-wrap">
+  <form class="card login-card" method="post" action="/login">
+    <div class="login-brand">🏥</div>
+    <h1>Đăng nhập</h1>
+    <p class="muted">Hệ thống báo cáo công tác khoa — nội bộ</p>
+    {% if error %}<div class="notice warn">{{ error }}</div>{% endif %}
+    <label>Tài khoản
+      <input name="username" required autofocus autocomplete="username" value="{{ username or '' }}">
+    </label>
+    <label>Mật khẩu
+      <input name="password" type="password" required autocomplete="current-password">
+    </label>
+    <button class="btn primary big" type="submit">Đăng nhập</button>
+    <div class="login-hint muted">
+      Demo: <code>admin / Admin@123</code> · khoa: <code>kpk / Khoa@123</code>
+    </div>
+  </form>
+</div>
+{% endblock %}
