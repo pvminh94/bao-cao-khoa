@@ -93,9 +93,19 @@ chown -R "$APP_USER:$APP_USER" "$APP_DIR"
 setfacl -R -m u:$APP_USER:rwx -m u:www-data:r-x "$APP_DIR" 2>/dev/null || true
 
 # init DB + seed + admin
+# BẮT BUỘC cd vào APP_DIR: `python -m app.cli` cần cwd chứa package `app/`
+# (sudo -u baocao không inherit cwd của bạn nếu ngoài /opt — hay gặp ModuleNotFoundError)
 echo "==> [7/7] Khởi tạo CSDL & tài khoản admin..."
-sudo -u "$APP_USER" "$APP_DIR/.venv/bin/python" -m app.cli init-db
-sudo -u "$APP_USER" "$APP_DIR/.venv/bin/python" -m app.cli create-admin "$ADMIN_USER" "$ADMIN_PASS"
+if [[ ! -d "$APP_DIR/app" ]]; then
+  echo "    ❌ Không thấy $APP_DIR/app — mã nguồn chưa được copy đúng."
+  echo "       Kiểm tra lại rsync ở bước [2/7]."
+  exit 1
+fi
+cd "$APP_DIR"
+sudo -u "$APP_USER" env HOME="$APP_DIR" PYTHONPATH="$APP_DIR" \
+  "$APP_DIR/.venv/bin/python" -m app.cli init-db
+sudo -u "$APP_USER" env HOME="$APP_DIR" PYTHONPATH="$APP_DIR" \
+  "$APP_DIR/.venv/bin/python" -m app.cli create-admin "$ADMIN_USER" "$ADMIN_PASS"
 
 systemctl restart bao-cao-khoa
 sleep 2

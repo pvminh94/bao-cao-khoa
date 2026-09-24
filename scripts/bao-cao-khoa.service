@@ -8,6 +8,7 @@ Type=simple
 User=baocao
 Group=baocao
 WorkingDirectory=/opt/bao-cao-khoa
+Environment=PYTHONPATH=/opt/bao-cao-khoa
 EnvironmentFile=/opt/bao-cao-khoa/.env
 ExecStart=/opt/bao-cao-khoa/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000
 Restart=always

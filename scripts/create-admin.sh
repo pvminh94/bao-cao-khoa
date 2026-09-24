@@ -8,4 +8,6 @@ if [[ $# -lt 2 ]]; then
   echo "Usage: sudo bash scripts/create-admin.sh <username> <password>"
   exit 1
 fi
-sudo -u "$USER_RUN" "$APP_DIR/.venv/bin/python" -m app.cli create-admin "$1" "$2"
+cd "$APP_DIR"
+sudo -u "$USER_RUN" env HOME="$APP_DIR" PYTHONPATH="$APP_DIR" \
+  "$APP_DIR/.venv/bin/python" -m app.cli create-admin "$1" "$2"
