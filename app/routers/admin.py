@@ -58,10 +58,11 @@ def lich_su(
     )
 
 
-def _admin_payload(db: Session) -> list[dict]:
-    depts = db.scalars(
-        select(Department).where(Department.active.is_(True)).order_by(Department.name)
-    ).all()
+def _admin_payload(db: Session, khoa_id: int | None = None) -> list[dict]:
+    q = select(Department).where(Department.active.is_(True))
+    if khoa_id:
+        q = q.where(Department.id == khoa_id)
+    depts = db.scalars(q.order_by(Department.name)).all()
     out = []
     for d in depts:
         tmpl = db.scalar(
@@ -74,14 +75,34 @@ def _admin_payload(db: Session) -> list[dict]:
     return out
 
 
+def _sec_href(db: Session, sec_id: int | None) -> str:
+    """URL quay lại đúng chỗ vừa sửa (khoa + anchor mục) — không nhảy về đầu trang."""
+    if not sec_id:
+        return "/cau-hinh"
+    sec = db.get(Section, sec_id)
+    if not sec:
+        return "/cau-hinh"
+    dept_id = sec.template.dept_id if sec.template else None
+    return f"/cau-hinh?tab=mau&khoa={dept_id}#sec-{sec_id}"
+
+
+def _col_href(db: Session, tmpl_id: int | None) -> str:
+    if not tmpl_id:
+        return "/cau-hinh?tab=doi-tuong"
+    tmpl = db.get(ReportTemplate, tmpl_id)
+    dept_id = tmpl.dept_id if tmpl else None
+    return f"/cau-hinh?tab=doi-tuong&khoa={dept_id}#tmpl-{tmpl_id}"
+
+
 @router.get("", response_class=HTMLResponse)
 def cau_hinh(
     request: Request,
     tab: str = "mau",
+    khoa: int | None = None,
     user: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
-    data = _admin_payload(db)
+    data = _admin_payload(db, khoa)
     users = db.scalars(select(User).order_by(User.username)).all()
     depts = db.scalars(
         select(Department).where(Department.active.is_(True)).order_by(Department.name)
@@ -89,7 +110,7 @@ def cau_hinh(
     return request.app.state.templates.TemplateResponse(
         request,
         "admin.html",
-        {"user": user, "data": data, "users": users, "depts": depts, "tab": tab},
+        {"user": user, "data": data, "users": users, "depts": depts, "tab": tab, "khoa_sel": khoa},
     )
 
 
@@ -123,7 +144,7 @@ def them_khoa(
         )
     )
     db.commit()
-    return RedirectResponse("/cau-hinh", status_code=303)
+    return RedirectResponse(_sec_href(db, s.id), status_code=303)
 
 
 @router.post("/khoa/{dept_id}/xoa")
@@ -157,7 +178,7 @@ def doi_ten_khoa(
     dept.hospital = hospital.strip()
     dept.report_code = report_code.strip()
     db.commit()
-    return RedirectResponse("/cau-hinh", status_code=303)
+    return RedirectResponse(f"/cau-hinh?tab=mau&khoa={dept_id}#dept-{dept_id}", status_code=303)
 
 
 # ---------------- mục / dòng ----------------
@@ -180,9 +201,10 @@ def them_muc(
         )
         or 0
     )
-    db.add(Section(tmpl_id=tmpl_id, title=title.strip(), sort_order=mx + 1))
+    s = Section(tmpl_id=tmpl_id, title=title.strip(), sort_order=mx + 1)
+    db.add(s)
     db.commit()
-    return RedirectResponse("/cau-hinh", status_code=303)
+    return RedirectResponse(_sec_href(db, s.id), status_code=303)
 
 
 @router.post("/muc/{sec_id}/sua")
@@ -196,7 +218,7 @@ def sua_muc(
     if sec:
         sec.title = title.strip()
         db.commit()
-    return RedirectResponse("/cau-hinh", status_code=303)
+    return RedirectResponse(_sec_href(db, sec_id), status_code=303)
 
 
 @router.post("/muc/{sec_id}/xoa")
@@ -210,7 +232,7 @@ def xoa_muc(
         # NGỪNG sử dụng thay vì xóa — giữ nguyên số liệu lịch sử
         sec.archived = True
         db.commit()
-    return RedirectResponse("/cau-hinh", status_code=303)
+    return RedirectResponse(_sec_href(db, sec_id), status_code=303)
 
 
 @router.post("/muc/{sec_id}/khoi-phuc")
@@ -223,7 +245,7 @@ def khoi_phuc_muc(
     if sec:
         sec.archived = False
         db.commit()
-    return RedirectResponse("/cau-hinh", status_code=303)
+    return RedirectResponse(_sec_href(db, sec_id), status_code=303)
 
 
 # ---------------- nhóm dòng (Block: vd "1.1. Trong giờ") ----------------
@@ -248,7 +270,7 @@ def them_nhom(
     )
     db.add(Block(section_id=section_id, label=label.strip(), sort_order=mx + 1))
     db.commit()
-    return RedirectResponse("/cau-hinh", status_code=303)
+    return RedirectResponse(_sec_href(db, section_id), status_code=303)
 
 
 @router.post("/nhom/{b_id}/sua")
@@ -262,7 +284,7 @@ def sua_nhom(
     if b:
         b.label = label.strip()
         db.commit()
-    return RedirectResponse("/cau-hinh", status_code=303)
+    return RedirectResponse(_sec_href(db, b.section_id if b else None), status_code=303)
 
 
 @router.post("/nhom/{b_id}/xoa")
@@ -275,7 +297,7 @@ def xoa_nhom(
     if b:
         b.archived = True  # ngừng dùng — số liệu giữ nguyên
         db.commit()
-    return RedirectResponse("/cau-hinh", status_code=303)
+    return RedirectResponse(_sec_href(db, b.section_id if b else None), status_code=303)
 
 
 @router.post("/nhom/{b_id}/khoi-phuc")
@@ -288,7 +310,7 @@ def khoi_phuc_nhom(
     if b:
         b.archived = False
         db.commit()
-    return RedirectResponse("/cau-hinh", status_code=303)
+    return RedirectResponse(_sec_href(db, b.section_id if b else None), status_code=303)
 
 
 @router.post("/nhom/{b_id}/len")
@@ -308,7 +330,7 @@ def len_nhom(
         if prev:
             prev.sort_order, b.sort_order = b.sort_order, prev.sort_order
             db.commit()
-    return RedirectResponse("/cau-hinh", status_code=303)
+    return RedirectResponse(_sec_href(db, b.section_id if b else None), status_code=303)
 
 
 @router.post("/nhom/{b_id}/xuong")
@@ -328,12 +350,13 @@ def xuong_nhom(
         if nxt:
             nxt.sort_order, b.sort_order = b.sort_order, nxt.sort_order
             db.commit()
-    return RedirectResponse("/cau-hinh", status_code=303)
+    return RedirectResponse(_sec_href(db, b.section_id if b else None), status_code=303)
 
 
 @router.post("/dong")
 def them_dong(
     section_id: int = Form(...),
+    block_id: int | None = Form(None),
     group_label: str = Form(""),
     row_label: str = Form(...),
     agg: str = Form("sum"),
@@ -343,6 +366,10 @@ def them_dong(
     sec = db.get(Section, section_id)
     if not sec:
         raise HTTPException(status_code=404)
+    if block_id is not None:
+        blk = db.get(Block, block_id)
+        if not blk or blk.section_id != section_id:
+            raise HTTPException(status_code=400, detail="Nhóm không thuộc mục này.")
     mx = (
         db.scalar(
             select(RptRow.sort_order)
@@ -355,6 +382,7 @@ def them_dong(
     db.add(
         RptRow(
             section_id=section_id,
+            block_id=block_id,
             group_label=group_label.strip(),
             row_label=row_label.strip(),
             agg=agg if agg in ("sum", "first", "last") else "sum",
@@ -362,7 +390,7 @@ def them_dong(
         )
     )
     db.commit()
-    return RedirectResponse("/cau-hinh", status_code=303)
+    return RedirectResponse(_sec_href(db, section_id), status_code=303)
 
 
 @router.post("/dong/{row_id}/sua")
@@ -380,7 +408,7 @@ def sua_dong(
         r.row_label = row_label.strip()
         r.agg = agg if agg in ("sum", "first", "last") else "sum"
         db.commit()
-    return RedirectResponse("/cau-hinh", status_code=303)
+    return RedirectResponse(_sec_href(db, r.section_id if r else None), status_code=303)
 
 
 @router.post("/dong/{row_id}/xoa")
@@ -393,7 +421,7 @@ def xoa_dong(
     if r:
         r.archived = True  # ngừng dùng — số liệu lịch sử giữ nguyên
         db.commit()
-    return RedirectResponse("/cau-hinh", status_code=303)
+    return RedirectResponse(_sec_href(db, r.section_id if r else None), status_code=303)
 
 
 @router.post("/dong/{row_id}/khoi-phuc")
@@ -406,7 +434,7 @@ def khoi_phuc_dong(
     if r:
         r.archived = False
         db.commit()
-    return RedirectResponse("/cau-hinh", status_code=303)
+    return RedirectResponse(_sec_href(db, r.section_id if r else None), status_code=303)
 
 
 @router.post("/dong/{row_id}/len")
@@ -417,16 +445,41 @@ def len_dong(
 ):
     r = db.get(RptRow, row_id)
     if r:
+        # chỉ đổi chỗ trong CÙNG nhóm (nếu dòng thuộc nhóm)
+        if r.block_id is None:
+            scope = [RptRow.section_id == r.section_id, RptRow.block_id.is_(None)]
+        else:
+            scope = [RptRow.block_id == r.block_id]
         prev = db.scalar(
-            select(RptRow)
-            .where(RptRow.section_id == r.section_id, RptRow.sort_order < r.sort_order)
-            .order_by(RptRow.sort_order.desc())
-            .limit(1)
+            select(RptRow).where(*scope, RptRow.sort_order < r.sort_order)
+            .order_by(RptRow.sort_order.desc()).limit(1)
         )
         if prev:
             prev.sort_order, r.sort_order = r.sort_order, prev.sort_order
             db.commit()
-    return RedirectResponse("/cau-hinh", status_code=303)
+    return RedirectResponse(_sec_href(db, r.section_id if r else None), status_code=303)
+
+
+@router.post("/dong/{row_id}/xuong")
+def xuong_dong(
+    row_id: int,
+    user: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    r = db.get(RptRow, row_id)
+    if r:
+        if r.block_id is None:
+            scope = [RptRow.section_id == r.section_id, RptRow.block_id.is_(None)]
+        else:
+            scope = [RptRow.block_id == r.block_id]
+        nxt = db.scalar(
+            select(RptRow).where(*scope, RptRow.sort_order > r.sort_order)
+            .order_by(RptRow.sort_order.asc()).limit(1)
+        )
+        if nxt:
+            nxt.sort_order, r.sort_order = r.sort_order, nxt.sort_order
+            db.commit()
+    return RedirectResponse(_sec_href(db, r.section_id if r else None), status_code=303)
 
 
 # ---------------- đối tượng (cột) — khai báo linh hoạt ----------------
@@ -475,7 +528,7 @@ def them_doi_tuong(
         )
     )
     db.commit()
-    return RedirectResponse("/cau-hinh?tab=doi-tuong", status_code=303)
+    return RedirectResponse(_col_href(db, tmpl_id), status_code=303)
 
 
 @router.post("/doi-tuong/{col_id}/sua")
@@ -497,7 +550,7 @@ def sua_doi_tuong(
         # giữ col_key cũ để công thức khác không vỡ
         c.formula = (formula or "").strip()
     db.commit()
-    return RedirectResponse("/cau-hinh?tab=doi-tuong", status_code=303)
+    return RedirectResponse(_col_href(db, c.tmpl_id if c else None), status_code=303)
 
 
 @router.post("/doi-tuong/{col_id}/xoa")
@@ -511,7 +564,7 @@ def xoa_doi_tuong(
         # ngừng dùng thay vì xóa — số liệu cũ vẫn còn và vẫn tính cho kỳ cũ
         c.archived = True
         db.commit()
-    return RedirectResponse("/cau-hinh?tab=doi-tuong", status_code=303)
+    return RedirectResponse(_col_href(db, c.tmpl_id if c else None), status_code=303)
 
 
 @router.post("/doi-tuong/{col_id}/khoi-phuc")
@@ -524,7 +577,7 @@ def khoi_phuc_doi_tuong(
     if c:
         c.archived = False
         db.commit()
-    return RedirectResponse("/cau-hinh?tab=doi-tuong", status_code=303)
+    return RedirectResponse(_col_href(db, c.tmpl_id if c else None), status_code=303)
 
 
 # ---------------- người dùng ----------------
