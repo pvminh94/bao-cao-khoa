@@ -50,8 +50,14 @@ fi
 
 echo "==> [3/7] PostgreSQL: tạo DB + user..."
 service postgresql start >/dev/null 2>&1 || systemctl start postgresql
-sudo -u postgres psql -tc "SELECT 1 FROM pg_roles WHERE rolname='${DB_USER}'" | grep -q 1 \
-  || sudo -u postgres psql -c "CREATE USER ${DB_USER} WITH PASSWORD '${DB_PASS}';"
+# LUÔN đồng bộ mật khẩu role với DB_PASS (idempotent) — tránh lệch .env ↔ Postgres
+if sudo -u postgres psql -tc "SELECT 1 FROM pg_roles WHERE rolname='${DB_USER}'" | grep -q 1; then
+  sudo -u postgres psql -c "ALTER USER ${DB_USER} WITH PASSWORD '${DB_PASS}';"
+  echo "    Đã cập nhật mật khẩu role ${DB_USER} theo DB_PASS."
+else
+  sudo -u postgres psql -c "CREATE USER ${DB_USER} WITH PASSWORD '${DB_PASS}';"
+  echo "    Đã tạo role ${DB_USER}."
+fi
 sudo -u postgres psql -tc "SELECT 1 FROM pg_database WHERE datname='${DB_NAME}'" | grep -q 1 \
   || sudo -u postgres createdb -O "$DB_USER" "$DB_NAME"
 sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE ${DB_NAME} TO ${DB_USER};" >/dev/null
@@ -64,6 +70,7 @@ python3 -m venv "$APP_DIR/.venv"
 "$APP_DIR/.venv/bin/pip" install -q -r "$APP_DIR/requirements.txt"
 
 echo "==> [5/7] Viết file .env..."
+# LUÔN ensure DATABASE_URL khớp DB_PASS hiện tại (giữ SECRET_KEY cũ nếu đã có)
 if [[ ! -f "$APP_DIR/.env" ]]; then
   SECRET=$(python3 -c "import secrets; print(secrets.token_urlsafe(48))")
   cat > "$APP_DIR/.env" <<EOF
@@ -76,10 +83,21 @@ PORT=${APP_PORT}
 SEED_ADMIN_USER=${ADMIN_USER}
 SEED_ADMIN_PASS=${ADMIN_PASS}
 EOF
-  chmod 600 "$APP_DIR/.env"
 else
-  echo "    .env đã tồn tại — bỏ qua."
+  # cập nhật lại dòng DATABASE_URL (and PORT/ADMIN seed) cho khớp DB_PASS mới
+  NEW_URL="postgresql+psycopg2://${DB_USER}:${DB_PASS}@127.0.0.1:5432/${DB_NAME}"
+  if grep -q '^DATABASE_URL=' "$APP_DIR/.env"; then
+    # escape ký tự đặc biệt của sed: \ & |
+    ESC_URL=$(printf '%s' "$NEW_URL" | sed -e 's/[\\&|]/\\&/g')
+    sed -i "s|^DATABASE_URL=.*|DATABASE_URL=${ESC_URL}|" "$APP_DIR/.env"
+  else
+    echo "DATABASE_URL=${NEW_URL}" >> "$APP_DIR/.env"
+  fi
+  grep -q '^PORT=' "$APP_DIR/.env" \
+    || echo "PORT=${APP_PORT}" >> "$APP_DIR/.env"
+  echo "    Đã đồng bộ DATABASE_URL trong .env với DB_PASS."
 fi
+chmod 600 "$APP_DIR/.env"
 
 echo "==> [6/7] systemd service..."
 cp "$APP_DIR/scripts/bao-cao-khoa.service" /etc/systemd/system/bao-cao-khoa.service
