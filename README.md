@@ -6,6 +6,51 @@ Phiên bản triển khai thật: **đăng nhập + phân quyền theo khoa + kh
 Form nhập theo khoa → PostgreSQL → Báo cáo động (ngày/tuần/tháng/khoảng) → Excel / In PDF
 ```
 
+## ⚡ Cài production: clone + 1 lệnh
+
+**Yêu cầu:** VPS/VM **Ubuntu 22.04 hoặc 24.04**, có quyền `sudo`, port 80 (HTTP) mở.
+
+```bash
+# 1) Clone
+git clone https://github.com/pvminh94/bao-cao-khoa.git
+cd bao-cao-khoa
+
+# 2) Cài hoàn tất (1 lệnh) — KHUYẾN NGHỊ đổi mật khẩu trước khi chạy
+sudo DB_PASS='mat_khau_postgres_manh' ADMIN_PASS='mat_khau_admin_manh' bash install.sh
+```
+
+Hoặc gộp thành **một dòng**:
+
+```bash
+git clone https://github.com/pvminh94/bao-cao-khoa.git \
+  && cd bao-cao-khoa \
+  && sudo DB_PASS='DoiMatKhauPg!' ADMIN_PASS='DoiMatKhauAdmin!' bash install.sh
+```
+
+**Script tự làm hết:**
+
+| # | Bước |
+|---|---|
+| 1 | `apt` Python, PostgreSQL, Nginx, font DejaVu… |
+| 2 | Tạo user hệ thống `baocao` + copy mã nguồn → `/opt/bao-cao-khoa` |
+| 3 | Tạo DB `baocao` + role PostgreSQL |
+| 4 | venv + `pip install -r requirements.txt` |
+| 5 | Sinh `.env` (SECRET_KEY ngẫu nhiên, DATABASE_URL trỏ Postgres) |
+| 6 | systemd `bao-cao-khoa` (enable + start) |
+| 7 | Init DB, seed khoa/mẫu mẫu, tạo admin |
+| 8 | Nginx reverse proxy **port 80** → app |
+
+**Sau khi cài xong:**
+
+```text
+Mở trình duyệt:  http://<IP-VPS>/
+Đăng nhập:       admin / <ADMIN_PASS bạn đã đặt>
+```
+
+Chạy lại (nâng cấp mã nguồn): clone/pull rồi chạy lại `sudo bash install.sh` — **không mất** `.env` và dữ liệu PostgreSQL.
+
+---
+
 ## 1. Tính năng
 
 | Nhóm | Chi tiết |

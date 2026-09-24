@@ -25,7 +25,7 @@ echo "==> [1/7] Cập nhật & cài gói hệ thống..."
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -y
 apt-get install -y python3 python3-venv python3-pip postgresql postgresql-contrib \
-  nginx ufw curl git acl fonts-dejavu-core
+  nginx ufw curl git acl rsync fonts-dejavu-core
 
 echo "==> [2/7] Tạo user chạy ứng dụng..."
 if ! id -u "$APP_USER" >/dev/null 2>&1; then
@@ -33,11 +33,20 @@ if ! id -u "$APP_USER" >/dev/null 2>&1; then
 fi
 mkdir -p "$APP_DIR"
 
-# Sao chép mã nguồn (nếu chạy từ thư mục dự án chứa scripts/)
+# Sao chép mã nguồn (chạy từ repo clone — script nằm trong scripts/)
 SRC_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 echo "    Nguồn: $SRC_DIR → $APP_DIR"
-rsync -a --exclude '.venv' --exclude '__pycache__' --exclude '*.db' \
-  --exclude '.git' --exclude 'node_modules' "$SRC_DIR/" "$APP_DIR/"
+# Nếu đang cài lại trên chính /opt thì bỏ qua rsync self-copy
+if [[ "$SRC_DIR" != "$APP_DIR" ]]; then
+  rsync -a --delete \
+    --exclude '.venv' --exclude '__pycache__' --exclude '*.db' \
+    --exclude '.git' --exclude 'node_modules' --exclude '.env' \
+    "$SRC_DIR/" "$APP_DIR/"
+  # giữ lại .env cũ nếu có (không bị --delete xóa nhờ exclude trên)
+  if [[ -f "$SRC_DIR/.env" && ! -f "$APP_DIR/.env" ]]; then
+    cp "$SRC_DIR/.env" "$APP_DIR/.env"
+  fi
+fi
 
 echo "==> [3/7] PostgreSQL: tạo DB + user..."
 service postgresql start >/dev/null 2>&1 || systemctl start postgresql
