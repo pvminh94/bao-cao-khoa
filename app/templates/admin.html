@@ -318,6 +318,9 @@
 {% if da_phuc_hoi %}
 <div class="notice warn">✅ Đã phục hồi từ <strong>{{ da_phuc_hoi }}</strong> — hệ thống đã tự tạo 1 bản sao lưu an toàn ngay trước khi ghi đè.</div>
 {% endif %}
+{% if loi %}
+<div class="notice warn" style="border-color:#c62828;background:#fdecea">❌ <strong>Phục hồi THẤT BẠI</strong> — dữ liệu hiện tại vẫn nguyên vẹn (đã tự hoàn tác). Bản sao lưu an toàn trước khi phục hồi vẫn còn trong danh sách. Chi tiết lỗi: <code>{{ loi }}</code></div>
+{% endif %}
 
 <div class="card" style="margin-top:1rem">
   <div class="card-title">Tạo bản sao lưu ngay</div>

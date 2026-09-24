@@ -707,6 +707,7 @@ def _audit_action(db: Session, user, action: str, label: str) -> None:
 def sao_luu(
     request: Request,
     da_phuc_hoi: str | None = None,
+    loi: str | None = None,
     user: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
@@ -720,6 +721,7 @@ def sao_luu(
             "backups": list_backups(),
             "backup_dir": str(backup_dir()),
             "da_phuc_hoi": da_phuc_hoi,
+            "loi": loi,
             "data": [],
             "depts": depts,
             "users": [],
@@ -791,9 +793,23 @@ def sao_luu_phuc_hoi(
     path = _safe_backup_path(name)
     try:
         payload = load_backup_file(path)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    _do_restore(db, user, payload, name)
+    except (ValueError, OSError) as e:
+        from urllib.parse import quote
+
+        return RedirectResponse(
+            f"/cau-hinh/sao-luu?loi={quote(f'File không đọc được: {e}'[:300])}",
+            status_code=303,
+        )
+    try:
+        _do_restore(db, user, payload, name)
+    except Exception as e:
+        db.rollback()  # dữ liệu hiện tại giữ nguyên
+        from urllib.parse import quote
+
+        return RedirectResponse(
+            f"/cau-hinh/sao-luu?loi={quote(f'{type(e).__name__}: {e}'[:300])}",
+            status_code=303,
+        )
     return RedirectResponse(f"/cau-hinh/sao-luu?da_phuc_hoi={name}", status_code=303)
 
 
@@ -807,8 +823,22 @@ async def sao_luu_tai_len(
     try:
         payload = read_uploaded(data)
     except (ValueError, UnicodeDecodeError) as e:
-        raise HTTPException(status_code=400, detail=f"File không hợp lệ: {e}")
-    _do_restore(db, user, payload, f"tải lên: {file.filename}")
+        from urllib.parse import quote
+
+        return RedirectResponse(
+            f"/cau-hinh/sao-luu?loi={quote(f'File tải lên không hợp lệ: {e}'[:300])}",
+            status_code=303,
+        )
+    try:
+        _do_restore(db, user, payload, f"tải lên: {file.filename}")
+    except Exception as e:
+        db.rollback()
+        from urllib.parse import quote
+
+        return RedirectResponse(
+            f"/cau-hinh/sao-luu?loi={quote(f'{type(e).__name__}: {e}'[:300])}",
+            status_code=303,
+        )
     return RedirectResponse(
         f"/cau-hinh/sao-luu?da_phuc_hoi={file.filename}", status_code=303
     )

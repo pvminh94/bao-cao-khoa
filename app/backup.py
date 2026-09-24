@@ -156,15 +156,16 @@ def restore_payload(db: Session, payload: dict) -> dict:
             counts[m.__tablename__] = len(rows)
 
         if is_pg:
-            with db.connection() as conn:
-                for m in TABLE_ORDER:
-                    tn = m.__tablename__
-                    conn.execute(
-                        text(
-                            f"SELECT setval(pg_get_serial_sequence('{tn}','id'), "
-                            f"COALESCE((SELECT MAX(id) FROM {tn}), 1))"
-                        )
+            # đặt lại sequence qua CHÍNH session (dùng `with db.connection()`
+            # sẽ đóng connection → transaction inactive → lỗi 500)
+            for m in TABLE_ORDER:
+                tn = m.__tablename__
+                db.execute(
+                    text(
+                        f"SELECT setval(pg_get_serial_sequence('{tn}','id'), "
+                        f"COALESCE((SELECT MAX(id) FROM {tn}), 1))"
                     )
+                )
         db.commit()
     except Exception:
         db.rollback()
